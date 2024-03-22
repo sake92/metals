@@ -18,7 +18,7 @@ import dotty.tools.dotc.core.Flags.*
 import dotty.tools.dotc.core.Symbols.Symbol
 import dotty.tools.dotc.core.Types.Type
 import dotty.tools.dotc.util.SourcePosition
-import org.eclipse.{lsp4j as l}
+import org.eclipse.lsp4j as l
 
 object InterpolatorCompletions:
 
@@ -46,7 +46,7 @@ object InterpolatorCompletions:
           completions,
           snippetsEnabled,
           hasStringInterpolator =
-            path.tail.headOption.exists(_.isInstanceOf[SeqLiteral]),
+            path.drop(1).headOption.exists(_.isInstanceOf[SeqLiteral]),
           search,
           buildTargetIdentifier,
         )
@@ -83,14 +83,14 @@ object InterpolatorCompletions:
           case _: Select => true
           case _ => false
         } =>
-      val allLiterals = parent match
-        case SeqLiteral(elems, _) =>
-          elems
-        case _ => Nil
-      expr.elems.zip(allLiterals.tail).collectFirst {
-        case (i: (Ident | Select), literal) if literal == lit =>
-          i
-      }
+      parent match
+        case SeqLiteral(elems, _) if elems.size > 0 =>
+          expr.elems.zip(elems.tail).collectFirst {
+            case (i: (Ident | Select), literal) if literal == lit =>
+              i
+          }
+        case _ => None
+
   end interpolatorMemberArg
 
   /**
@@ -177,7 +177,7 @@ object InterpolatorCompletions:
       }.flatten
 
     val qualType = for
-      parent <- path.tail.headOption.toList
+      parent <- path.drop(1).headOption.toList
       if lit.span.exists && text.charAt(lit.span.point - 1) != '}'
       identOrSelect <- path
         .collectFirst(interpolatorMemberArg(lit, parent))

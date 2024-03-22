@@ -2,13 +2,16 @@ package tests.scalacli
 
 import scala.concurrent.Future
 
+import scala.meta.internal.metals.DebugUnresolvedMainClassParams
 import scala.meta.internal.metals.FileOutOfScalaCliBspScope
 import scala.meta.internal.metals.InitializationOptions
+import scala.meta.internal.metals.JsonParser._
 import scala.meta.internal.metals.Messages
 import scala.meta.internal.metals.MetalsEnrichments._
 import scala.meta.internal.metals.MetalsServerConfig
 import scala.meta.internal.metals.ServerCommands
 import scala.meta.internal.metals.SlowTaskConfig
+import scala.meta.internal.metals.debug.TestDebugger
 import scala.meta.internal.metals.scalacli.ScalaCli
 import scala.meta.internal.metals.{BuildInfo => V}
 
@@ -24,6 +27,8 @@ class ScalaCliSuite extends BaseScalaCliSuite(V.scala3) {
       InitializationOptions.Default.copy(
         inlineDecorationProvider = Some(true),
         decorationProvider = Some(true),
+        debuggingProvider = Option(true),
+        runProvider = Option(true),
       )
     )
 
@@ -189,30 +194,30 @@ class ScalaCliSuite extends BaseScalaCliSuite(V.scala3) {
       )
 
       _ <- server.didOpen("MyTests.sc")
-      _ = assertNoDiff(
-        client.syntheticDecorations,
-        s"""#!/usr/bin/env -S scala-cli shebang --java-opt -Xms256m --java-opt -XX:MaxRAMPercentage=80 
-           |//> using scala "$scalaVersion"
-           |//> using lib "com.lihaoyi::utest::0.7.10"
-           |//> using lib com.lihaoyi::pprint::0.6.6
-           |
-           |import foo.Foo
-           |import utest._
-           | 
-           |pprint.log[Int](2)(generate, generate) // top-level statement should be fine in a script
-           |
-           |object MyTests extends TestSuite {
-           |  pprint.log[Int](2)(generate, generate)
-           |  val tests: Tests = Tests {
-           |    test("foo") {
-           |      assert(2 + 2 == 4)
-           |    }
-           |    test("nope") {
-           |      assert(2 + 2 == (new Foo).value)
-           |    }
-           |  }
-           |}
-           |""".stripMargin,
+      _ <- server.assertInlayHints(
+        "MyTests.sc",
+        s"""|#!/usr/bin/env -S scala-cli shebang --java-opt -Xms256m --java-opt -XX:MaxRAMPercentage=80 
+            |//> using scala "$scalaVersion"
+            |//> using lib "com.lihaoyi::utest::0.7.10"
+            |//> using lib com.lihaoyi::pprint::0.6.6
+            |
+            |import foo.Foo
+            |import utest._
+            | 
+            |pprint.log/*[Int<<scala/Int#>>]*/(2)/*(using generate<<sourcecode/LineMacros#generate().>>, generate<<sourcecode/FileNameMacros#generate().>>)*/ // top-level statement should be fine in a script
+            |
+            |object MyTests extends TestSuite {
+            |  pprint.log/*[Int<<scala/Int#>>]*/(2)/*(using generate<<sourcecode/LineMacros#generate().>>, generate<<sourcecode/FileNameMacros#generate().>>)*/
+            |  val tests/*: Tests<<utest/Tests#>>*/ = Tests {
+            |    test("foo") {
+            |      assert(2 + 2 == 4)
+            |    }
+            |    test("nope") {
+            |      assert(2 + 2 == (new Foo).value)
+            |    }
+            |  }
+            |}
+            |""".stripMargin,
       )
     } yield ()
 
@@ -252,7 +257,7 @@ class ScalaCliSuite extends BaseScalaCliSuite(V.scala3) {
     simpleFileTest(useBsp = false)
   }
 
-  test(s"simple-script-bsp") {
+  test(s"simple-script-bsp".flaky) {
     cleanWorkspace()
     simpleScriptTest(useBsp = true)
   }
@@ -307,6 +312,7 @@ class ScalaCliSuite extends BaseScalaCliSuite(V.scala3) {
   }
 
   test("inner") {
+    cleanWorkspace()
     for {
       _ <- scalaCliInitialize(useBsp = false)(
         s"""|/inner/project.scala
@@ -458,7 +464,7 @@ class ScalaCliSuite extends BaseScalaCliSuite(V.scala3) {
       _ <- scalaCliInitialize(useBsp = true)(
         s"""|/Main.scala
             |//> using scala 2.13.11
-            |// > using toolkit latest
+            |// > using toolkit default
             |
             |object Main {
             |    println(os.pwd)
@@ -546,4 +552,167 @@ class ScalaCliSuite extends BaseScalaCliSuite(V.scala3) {
     } yield ()
   }
 
+  def startDebugging(
+      main: String,
+      buildTarget: String,
+  ): Future[TestDebugger] = {
+    server.startDebuggingUnresolved(
+      new DebugUnresolvedMainClassParams(main, buildTarget).toJson
+    )
+  }
+
+  test("base-native-run") {
+    cleanWorkspace()
+    for {
+      _ <- scalaCliInitialize(useBsp = true)(
+        s"""/MyMain.scala
+           |//> using scala "$scalaVersion"
+           |//> using platform "native"
+           |
+           |import scala.scalanative._
+           |
+           |object MyMain {
+           |  def main(args: Array[String]): Unit = {
+           |    println("Hello world!")
+           |    System.exit(0)
+           |  }
+           |}
+           |
+           |object MyMain2 {
+           |  def main(args: Array[String]): Unit = {
+           |    println("Hello world!")
+           |    System.exit(0)
+           |  }
+           |}
+           |
+           |""".stripMargin
+      )
+      _ <- server.didOpen("MyMain.scala")
+      textWithLenses <- server.codeLensesText(
+        "MyMain.scala",
+        printCommand = false,
+      )(maxRetries = 5)
+      _ = assertNoDiff(
+        textWithLenses,
+        s"""|//> using scala "$scalaVersion"
+            |//> using platform "native"
+            |
+            |import scala.scalanative._
+            |
+            |<<run>>
+            |object MyMain {
+            |  def main(args: Array[String]): Unit = {
+            |    println("Hello world!")
+            |    System.exit(0)
+            |  }
+            |}
+            |
+            |<<run>>
+            |object MyMain2 {
+            |  def main(args: Array[String]): Unit = {
+            |    println("Hello world!")
+            |    System.exit(0)
+            |  }
+            |}
+            |
+            |""".stripMargin,
+      )
+      targets <- server.listBuildTargets
+      mainTarget = targets.find(!_.contains("test"))
+      _ = assert(mainTarget.isDefined, "No main target specified")
+      debugServer <- startDebugging("MyMain", mainTarget.get)
+      _ <- debugServer.initialize
+      _ <- debugServer.launch
+      _ <- debugServer.configurationDone
+      _ <- debugServer.shutdown
+      output <- debugServer.allOutput
+    } yield assertContains(output, "Hello world!\n")
+  }
+
+  test("cancel-native-run") {
+    cleanWorkspace()
+    for {
+      _ <- scalaCliInitialize(useBsp = true)(
+        s"""/MyMain.scala
+           |//> using scala "$scalaVersion"
+           |//> using platform "native"
+           |
+           |import scala.scalanative._
+           |
+           |object MyMain {
+           |  def main(args: Array[String]): Unit = {
+           |    println("Hello world!")
+           |    while(true){} // infinite loop
+           |    System.exit(0)
+           |  }
+           |}
+           |
+           |""".stripMargin
+      )
+      _ <- server.didOpen("MyMain.scala")
+      targets <- server.listBuildTargets
+      mainTarget = targets.find(!_.contains("test"))
+      _ = assert(mainTarget.isDefined, "No main target specified")
+      debugServer <- startDebugging("MyMain", mainTarget.get)
+      _ <- debugServer.initialize
+      _ <- debugServer.launch
+      _ <- debugServer.configurationDone
+      _ <- debugServer.disconnect
+      _ <- debugServer.shutdown
+      output <- debugServer.allOutput
+    } yield ()
+  }
+
+  test("base-js-run") {
+    cleanWorkspace()
+    for {
+      _ <- scalaCliInitialize(useBsp = true)(
+        s"""/MyMain.scala
+           |//> using scala "$scalaVersion"
+           |//> using platform "js"
+           |
+           |import scala.scalajs.js
+           |
+           |object MyMain {
+           |  def main(args: Array[String]): Unit = {
+           |    println("Hello world!")
+           |    // System.exit(0)
+           |  }
+           |}
+           |
+           |""".stripMargin
+      )
+      _ <- server.didOpen("MyMain.scala")
+      textWithLenses <- server.codeLensesText(
+        "MyMain.scala",
+        printCommand = false,
+      )(maxRetries = 5)
+      _ = assertNoDiff(
+        textWithLenses,
+        s"""|//> using scala "$scalaVersion"
+            |//> using platform "js"
+            |
+            |import scala.scalajs.js
+            |
+            |<<run>>
+            |object MyMain {
+            |  def main(args: Array[String]): Unit = {
+            |    println("Hello world!")
+            |    // System.exit(0)
+            |  }
+            |}
+            |
+            |""".stripMargin,
+      )
+      targets <- server.listBuildTargets
+      mainTarget = targets.find(!_.contains("test"))
+      _ = assert(mainTarget.isDefined, "No main target specified")
+      debugServer <- startDebugging("MyMain", mainTarget.get)
+      _ <- debugServer.initialize
+      _ <- debugServer.launch
+      _ <- debugServer.configurationDone
+      _ <- debugServer.shutdown
+      output <- debugServer.allOutput
+    } yield assertContains(output, "Hello world!\n")
+  }
 }

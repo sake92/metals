@@ -43,7 +43,7 @@ class CompletionCrossLspSuite
         "extends Serializable@@",
         """|DefaultSerializable - scala.collection.generic
            |NotSerializableException - java.io
-           |Serializable a
+           |Serializable  a
            |Serializable - java.io
            |SerializablePermission - java.io
            |""".stripMargin,
@@ -106,6 +106,54 @@ class CompletionCrossLspSuite
     } yield ()
   }
 
+  test("implicit-class") {
+    cleanWorkspace()
+    for {
+      _ <- initialize(
+        s"""/metals.json
+           |{
+           |  "a": { "scalaVersion": "${V.scala3}" }
+           |}
+           |/a/src/main/scala/a/B.scala
+           |package b
+           |implicit class B (num: Int):
+           |  def plus(other: Int) = num + other
+           |/a/src/main/scala/a/A.scala
+           |package a
+           |
+           |object A {
+           |  // @@
+           |}
+           |""".stripMargin
+      )
+      _ <- server.didOpen("a/src/main/scala/a/B.scala")
+      _ = assertNoDiagnostics()
+      _ <- assertCompletionEdit(
+        "1.p@@",
+        """|package a
+           |
+           |import b.B
+           |
+           |object A {
+           |  1.plus($0)
+           |}
+           |""".stripMargin,
+        filter = _.contains("plus"),
+      )
+      _ <- assertCompletion(
+        "1.pl@@",
+        """|plus(other: Int): Int (implicit)
+           |""".stripMargin,
+        filter = _.contains("plus"),
+      )
+      _ <- assertCompletion(
+        "\"plus is not available for string\".plu@@",
+        "",
+        filter = _.contains("plus"),
+      )
+    } yield ()
+  }
+
   test("basic-scala3") {
     cleanWorkspace()
     for {
@@ -147,6 +195,35 @@ class CompletionCrossLspSuite
            |MyClass2(name: String): MyClass2
            |MyClass3 - foo
            |MyClass3(name: String): Nothing
+           |""".stripMargin,
+        filename = Some("a/src/main/scala/Main.scala"),
+      )
+    } yield ()
+  }
+
+  test("check-scala211") {
+    cleanWorkspace()
+    for {
+      _ <- initialize(
+        s"""/metals.json
+           |{
+           |  "a": { "scalaVersion": "${V.scala211}" }
+           |}
+           |/a/src/main/scala/Main.scala
+           |object Main extends App {
+           |  println("Hello, World!")
+           |  println("Hello, World!")
+           |  println("Hello, World!")
+           |  // @@
+           |}
+           |""".stripMargin
+      )
+      _ <- server.didOpen("a/src/main/scala/Main.scala")
+      _ = assertNoDiagnostics()
+      _ <- assertCompletion(
+        "println@@",
+        """|println(): Unit
+           |println(x: Any): Unit
            |""".stripMargin,
         filename = Some("a/src/main/scala/Main.scala"),
       )

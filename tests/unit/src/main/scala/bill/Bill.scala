@@ -30,6 +30,7 @@ import scala.util.Try
 import scala.util.control.NonFatal
 
 import scala.meta.internal.metals.BuildInfo
+import scala.meta.internal.metals.Directories
 import scala.meta.internal.metals.Embedded
 import scala.meta.internal.metals.MetalsEnrichments._
 import scala.meta.internal.metals.PositionSyntax._
@@ -195,9 +196,6 @@ object Bill {
     }
     override def workspaceBuildTargets()
         : CompletableFuture[WorkspaceBuildTargetsResult] = {
-      sleepBeforePingResponse.foreach(duration =>
-        Thread.sleep(duration.toMillis)
-      )
       CompletableFuture.completedFuture {
         new WorkspaceBuildTargetsResult(Collections.singletonList(target))
       }
@@ -318,6 +316,11 @@ object Bill {
     override def buildTargetCompile(
         params: CompileParams
     ): CompletableFuture[CompileResult] = {
+      if (params.getTargets().isEmpty()) {
+        sleepBeforePingResponse.foreach(duration =>
+          Thread.sleep(duration.toMillis)
+        )
+      }
       CompletableFuture.completedFuture {
         reporter.reset()
         val run = new g.Run()
@@ -474,23 +477,26 @@ object Bill {
    * Installed this build tool only for the local workspace
    */
   def installWorkspace(
-      directory: Path,
+      directory: AbsolutePath,
       name: String = "Bill",
   ): Unit = {
-    handleInstall(directory.resolve(".bsp"), name)
+    handleInstall(directory.resolve(Directories.bsp), name)
   }
 
   /**
    * Installed this build server globally for the machine
    */
   def installGlobal(
-      directory: Path,
+      directory: AbsolutePath,
       name: String = "Bill",
   ): Unit = {
     handleInstall(directory.resolve("bsp"), name)
   }
 
-  private def handleInstall(directory: Path, name: String = "Bill"): Unit = {
+  private def handleInstall(
+      directory: AbsolutePath,
+      name: String = "Bill",
+  ): Unit = {
     val java =
       Paths.get(System.getProperty("java.home")).resolve("bin").resolve("java")
     val classpath = myClasspath.mkString(File.pathSeparator)
@@ -509,8 +515,8 @@ object Bill {
     )
     val json = new GsonBuilder().setPrettyPrinting().create().toJson(details)
     val bspJson = directory.resolve(s"${name.toLowerCase()}.json")
-    Files.createDirectories(directory)
-    Files.write(bspJson, json.getBytes(StandardCharsets.UTF_8))
+    directory.createDirectories()
+    bspJson.writeText(json)
     println(s"installed: $bspJson")
   }
 
@@ -584,7 +590,7 @@ object Bill {
   def main(args: Array[String]): Unit = {
     args.toList match {
       case List("help" | "--help" | "-help" | "-h") => handleHelp()
-      case List("install") => handleInstall(cwd)
+      case List("install") => handleInstall(AbsolutePath(cwd))
       case List("bsp") => handleBsp()
       case List("compile") => handleCompile(cwd)
       case List("compile", wd) => handleCompile(Paths.get(wd))

@@ -7,13 +7,14 @@ sidebar_label: Overview
 Metals works with the following build tools with varying degrees of
 functionality.
 
-| Build tool |    Installation     | Goto library dependencies | Find references |
-| ---------- | :-----------------: | :-----------------------: | :-------------: |
-| sbt        | Automatic via Bloop |         Automatic         |    Automatic    |
-| Maven      | Automatic via Bloop |         Automatic         | Semi-automatic  |
-| Gradle     | Automatic via Bloop |         Automatic         |    Automatic    |
-| Mill       | Automatic via Bloop |         Automatic         |    Automatic    |
-| Bloop      |      Automatic      |      Semi-automatic       | Semi-automatic  |
+| Build tool          |    Installation     | Goto library dependencies | Find references |
+| ------------------- | :-----------------: | :-----------------------: | :-------------: |
+| [sbt](sbt.md)       | Automatic via Bloop |         Automatic         |    Automatic    |
+| [Maven](maven.md)   | Automatic via Bloop |         Automatic         | Semi-automatic  |
+| [Gradle](gradle.md) | Automatic via Bloop |         Automatic         |    Automatic    |
+| [Mill](mill.md)     | Automatic via Bloop |         Automatic         |    Automatic    |
+| [Bloop](bloop.md)   |      Automatic      |      Semi-automatic       | Semi-automatic  |
+| [Bazel](bazel.md)   |      Automatic      |     Build definition      | Semi-automatic  |
 
 ## Installation
 
@@ -43,6 +44,9 @@ compiler plugin and `-Yrangepos` option enabled.
 the
 [Bloop JSON files](https://scalacenter.github.io/bloop/docs/configuration-format/)
 are populated with `*-sources.jar`.
+
+**Build definition**: navigation in library dependency sources works as long as
+the sources are enabled for library dependencies in the Bazel definition.
 
 ## Find references
 

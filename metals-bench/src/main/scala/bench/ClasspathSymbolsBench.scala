@@ -3,6 +3,7 @@ package bench
 import java.util.concurrent.TimeUnit
 
 import scala.meta.dialects
+import scala.meta.internal.metals.BuildTargets
 import scala.meta.internal.metals.EmptyReportContext
 import scala.meta.internal.metals.MetalsEnrichments._
 import scala.meta.internal.tvp.IndexedSymbols
@@ -17,6 +18,7 @@ import org.openjdk.jmh.annotations.Setup
 import org.openjdk.jmh.annotations.State
 import org.openjdk.jmh.annotations.TearDown
 import tests.Library
+import tests.TreeUtils
 
 @State(Scope.Benchmark)
 class ClasspathSymbolsBench {
@@ -35,8 +37,12 @@ class ClasspathSymbolsBench {
   @OutputTimeUnit(TimeUnit.MILLISECONDS)
   def run(): Unit = {
     implicit val reporting = EmptyReportContext
+    val (buffers, trees) = TreeUtils.getTrees(scalaVersion = None)
     val jars = new IndexedSymbols(
-      isStatisticsEnabled = false
+      isStatisticsEnabled = false,
+      trees,
+      buffers,
+      BuildTargets.empty,
     )
     classpath.foreach { jar =>
       jars.jarSymbols(jar, "cats/", dialects.Scala213)

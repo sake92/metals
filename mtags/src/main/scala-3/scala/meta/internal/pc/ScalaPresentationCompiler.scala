@@ -3,11 +3,11 @@ package scala.meta.internal.pc
 import java.io.File
 import java.net.URI
 import java.nio.file.Path
+import java.util as ju
 import java.util.Optional
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.ScheduledExecutorService
-import java.{util as ju}
 
 import scala.collection.JavaConverters.*
 import scala.concurrent.ExecutionContext
@@ -20,14 +20,16 @@ import scala.meta.internal.metals.ReportContext
 import scala.meta.internal.metals.ReportLevel
 import scala.meta.internal.metals.StdReportContext
 import scala.meta.internal.mtags.BuildInfo
+import scala.meta.internal.mtags.MtagsEnrichments.given
 import scala.meta.internal.pc.completions.CompletionProvider
 import scala.meta.internal.pc.completions.OverrideCompletions
 import scala.meta.pc.*
+import scala.meta.pc.PcSymbolInformation as IPcSymbolInformation
 
 import dotty.tools.dotc.reporting.StoreReporter
+import org.eclipse.lsp4j as l
 import org.eclipse.lsp4j.DocumentHighlight
 import org.eclipse.lsp4j.TextEdit
-import org.eclipse.{lsp4j as l}
 
 case class ScalaPresentationCompiler(
     buildTargetIdentifier: String = "",
@@ -64,6 +66,15 @@ case class ScalaPresentationCompiler(
       config,
       sh,
       () => new Scala3CompilerWrapper(newDriver),
+      () =>
+        s"""|Scala version: $scalaVersion
+            |Classpath:
+            |${classpath
+             .map(path => s"$path [${if path.exists then "exists" else "missing"} ]")
+             .mkString(", ")}
+            |Options:
+            |${options.mkString(" ")}
+            |""".stripMargin,
     )(using
       ec
     )
@@ -99,15 +110,15 @@ case class ScalaPresentationCompiler(
       new PcSemanticTokensProvider(driver, params).provide().asJava
     }
 
-  override def syntheticDecorations(
-      params: SyntheticDecorationsParams
-  ): ju.concurrent.CompletableFuture[ju.List[SyntheticDecoration]] =
+  override def inlayHints(
+      params: InlayHintsParams
+  ): ju.concurrent.CompletableFuture[ju.List[l.InlayHint]] =
     compilerAccess.withInterruptableCompiler(Some(params))(
-      new ju.ArrayList[SyntheticDecoration](),
+      new ju.ArrayList[l.InlayHint](),
       params.token(),
     ) { access =>
       val driver = access.compiler()
-      new PcSyntheticDecorationsProvider(driver, params, search)
+      new PcInlayHintsProvider(driver, params, search)
         .provide()
         .asJava
     }
@@ -176,6 +187,21 @@ case class ScalaPresentationCompiler(
 
   def diagnosticsForDebuggingPurposes(): ju.List[String] =
     List[String]().asJava
+
+  override def info(
+      symbol: String
+  ): CompletableFuture[Optional[IPcSymbolInformation]] =
+    compilerAccess.withNonInterruptableCompiler[Optional[IPcSymbolInformation]](
+      None
+    )(
+      Optional.empty(),
+      EmptyCancelToken,
+    ) { access =>
+      SymbolInformationProvider(using access.compiler().currentCtx)
+        .info(symbol)
+        .map(_.asJava)
+        .asJava
+    }
 
   def semanticdbTextDocument(
       filename: URI,

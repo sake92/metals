@@ -292,7 +292,7 @@ class CompletionCaseSuite extends BaseCompletionSuite {
        |""".stripMargin,
     compat = Map("3" -> """|case None => scala
                            |case Some(value) => scala
-                           |case (exhaustive) Option (2 cases)
+                           |case (exhaustive) Option[Int] (2 cases)
                            |""".stripMargin)
   )
 
@@ -338,7 +338,7 @@ class CompletionCaseSuite extends BaseCompletionSuite {
        |""".stripMargin,
     compat = Map("3" -> """|case None => scala
                            |case Some(value) => scala
-                           |case (exhaustive) Option (2 cases)
+                           |case (exhaustive) Option[Int] (2 cases)
                            |""".stripMargin)
   )
 
@@ -356,7 +356,7 @@ class CompletionCaseSuite extends BaseCompletionSuite {
        |""".stripMargin,
     compat = Map("3" -> """|case None => scala
                            |case Some(value) => scala
-                           |case (exhaustive) Option (2 cases)
+                           |case (exhaustive) Option[Int] (2 cases)
                            |""".stripMargin)
   )
 
@@ -581,7 +581,7 @@ class CompletionCaseSuite extends BaseCompletionSuite {
   )
 
   check(
-    "private-member".tag(IgnoreScala2),
+    "private-member1".tag(IgnoreScala2),
     """
       |package example
       |import scala.collection.immutable.Vector
@@ -591,7 +591,8 @@ class CompletionCaseSuite extends BaseCompletionSuite {
       |    ca@@  
       |  }
       |}""".stripMargin,
-    ""
+    """|case
+       |""".stripMargin
   )
 
   check(
@@ -777,6 +778,92 @@ class CompletionCaseSuite extends BaseCompletionSuite {
        |}
        |""".stripMargin,
     "case (Int, Int) => scala"
+  )
+
+  check(
+    "keyword-only",
+    """
+      |sealed trait Alpha
+      |object A {
+      |  List.empty[Alpha].groupBy{
+      |    ca@@
+      |  }
+      |}""".stripMargin,
+    """|case
+       |""".stripMargin
+  )
+
+  check(
+    "union-type".tag(IgnoreScala2),
+    """
+      |case class Foo(a: Int)
+      |case class Bar(b: Int)
+      |
+      |object O {
+      |  val x: Foo | Bar = ???
+      |  val y  = List(x).map{ ca@@ }
+      |}""".stripMargin,
+    """|case Bar(b) => union-type
+       |case Foo(a) => union-type
+       |case (exhaustive) Foo | Bar (2 cases)
+       |""".stripMargin
+  )
+
+  checkEdit(
+    "union-type-edit".tag(IgnoreScala2),
+    """
+      |case class Foo(a: Int)
+      |case class Bar(b: Int)
+      |
+      |object O {
+      |  val x: Foo | Bar = ???
+      |  val y  = List(x).map{ ca@@ }
+      |}""".stripMargin,
+    s"""|case class Foo(a: Int)
+        |case class Bar(b: Int)
+        |
+        |object O {
+        |  val x: Foo | Bar = ???
+        |  val y  = List(x).map{ 
+        |\tcase Foo(a) => $$0
+        |\tcase Bar(b) =>
+        | }
+        |}
+        |""".stripMargin,
+    filter = _.contains("exhaustive")
+  )
+
+  check(
+    "summonFrom".tag(IgnoreScala2),
+    """
+      |object A {
+      |  import scala.compiletime.summonFrom
+      |  class A
+      |  
+      |  inline def f: Any = summonFrom {
+      |    case x@@: A => ???  // error: ambiguous givens
+      |  }
+      |}
+      |""".stripMargin,
+    ""
+  )
+
+  check(
+    "summonFrom1".tag(IgnoreScala2),
+    """
+      |object A {
+      |  import scala.compiletime.summonFrom
+      |  
+      |  class A
+      |  given a1: A = new A
+      |  given a2: A = new A
+      |  
+      |  inline def f: Any = summonFrom {
+      |    case x@@: A => ???  // error: ambiguous givens
+      |  }
+      |}
+      |""".stripMargin,
+    ""
   )
 
 }

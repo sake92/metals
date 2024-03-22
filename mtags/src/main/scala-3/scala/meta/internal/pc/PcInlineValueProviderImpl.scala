@@ -14,7 +14,7 @@ import dotty.tools.dotc.core.Symbols.Symbol
 import dotty.tools.dotc.interactive.Interactive
 import dotty.tools.dotc.interactive.InteractiveDriver
 import dotty.tools.dotc.util.SourcePosition
-import org.eclipse.{lsp4j as l}
+import org.eclipse.lsp4j as l
 
 final class PcInlineValueProviderImpl(
     val driver: InteractiveDriver,
@@ -158,7 +158,7 @@ final class PcInlineValueProviderImpl(
       val path =
         Interactive.pathTo(unit.tpdTree, occurence.pos.span)(using newctx)
       val indexedContext = IndexedContext(
-        MetalsInteractive.contextOfPath(path)(using newctx)
+        Interactive.contextOfPath(path)(using newctx)
       )
       import indexedContext.ctx
       val conflictingSymbols = symbols

@@ -9,6 +9,7 @@ import scala.meta.internal.jdk.CollectionConverters.*
 import scala.meta.internal.metals.Report
 import scala.meta.internal.metals.ReportContext
 import scala.meta.internal.mtags.MtagsEnrichments.*
+import scala.meta.internal.pc.Compat.EvidenceParamName
 import scala.meta.internal.pc.IndexedContext
 import scala.meta.internal.pc.Params
 import scala.meta.internal.pc.printer.ShortenedNames.ShortName
@@ -18,14 +19,13 @@ import scala.meta.pc.SymbolSearch
 import dotty.tools.dotc.core.Contexts.Context
 import dotty.tools.dotc.core.Flags
 import dotty.tools.dotc.core.Flags.*
-import dotty.tools.dotc.core.NameKinds.EvidenceParamName
 import dotty.tools.dotc.core.NameOps.*
 import dotty.tools.dotc.core.Names.Name
 import dotty.tools.dotc.core.StdNames
 import dotty.tools.dotc.core.Symbols.NoSymbol
 import dotty.tools.dotc.core.Symbols.Symbol
-import dotty.tools.dotc.core.Types.Type
 import dotty.tools.dotc.core.Types.*
+import dotty.tools.dotc.core.Types.Type
 
 class MetalsPrinter(
     names: ShortenedNames,
@@ -54,6 +54,8 @@ class MetalsPrinter(
     )
 
   def shortenedNames: List[ShortName] = names.namesToImport
+
+  def getUsedRenamesInfo(): List[String] = names.getUsedRenamesInfo
 
   def expressionType(tpw: Type)(using Context): Option[String] =
     tpw match
@@ -129,11 +131,10 @@ class MetalsPrinter(
     val typeSymbol = info.typeSymbol
 
     if sym.is(Flags.Package) || sym.isClass then
-      " " + dotcPrinter.fullName(sym.effectiveOwner)
+      " " + fullName(sym.effectiveOwner)
     else if sym.is(Flags.Module) || typeSymbol.is(Flags.Module) then
-      if typeSymbol != NoSymbol then
-        " " + dotcPrinter.fullName(typeSymbol.effectiveOwner)
-      else " " + dotcPrinter.fullName(sym.effectiveOwner)
+      if typeSymbol != NoSymbol then " " + fullName(typeSymbol.effectiveOwner)
+      else " " + fullName(sym.effectiveOwner)
     else if sym.is(Flags.Method) then
       defaultMethodSignature(sym, info, onlyMethodParams = true)
     else if sym.isType
@@ -144,6 +145,9 @@ class MetalsPrinter(
     else tpe(info)
     end if
   end completionSymbol
+
+  def fullName(sym: Symbol): String =
+    dotcPrinter.fullName(sym)
 
   /**
    * Compute method signature for the given (method) symbol.

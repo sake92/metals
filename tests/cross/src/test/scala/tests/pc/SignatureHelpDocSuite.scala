@@ -165,28 +165,66 @@ class SignatureHelpDocSuite extends BaseSignatureHelpSuite {
             |                  ^^^^^^^^^^^^^^^^^
             |  @param op (Int, Int) => Int
             |""".stripMargin,
+      "2.13.13" ->
+        s"""|Applies the given binary operator `op` to the given initial value `z` and all
+            | elements of this collection, going left to right. Returns the initial value if this collection
+            | is empty.
+            |
+            | "Going left to right" only makes sense if this collection is ordered: then if
+            | `x`, `x`, ..., `x` are the elements of this collection, the result is
+            | `op( op( ... op( op(z, x), x) ... ), x)`.
+            |
+            | If this collection is not ordered, then for each application of the operator, each
+            | right operand is an element. In addition, the leftmost operand is the initial
+            | value, and each other left operand is itself an application of the operator. The
+            | elements of this collection and the initial value all appear exactly once in the
+            | computation.
+            |
+            | Note: might return different results for different runs, unless the underlying collection type is ordered.
+            | Note: will not terminate for infinite-sized collections.
+            |
+            |
+            |**Type Parameters**
+            |- `B`: The result type of the binary operator.
+            |
+            |**Parameters**
+            |- `z`: An initial value.
+            |- `op`: A binary operator.
+            |
+            |**Returns:** The result of applying `op` to `z` and all elements of this collection,
+            |                   going left to right. Returns `z` if this collection is empty.
+            |foldLeft[B](z: B)(op: (B, Int) => B): B
+            |                  ^^^^^^^^^^^^^^^^^
+            |  @param op (Int, Int) => Int
+            |""".stripMargin,
       "3" ->
-        """|Applies a binary operator to a start value and all elements of this collection,
-           | going left to right.
+        """|Applies the given binary operator `op` to the given initial value `z` and all
+           | elements of this collection, going left to right. Returns the initial value if this collection
+           | is empty.
            |
+           | "Going left to right" only makes sense if this collection is ordered: then if
+           | `x`, `x`, ..., `x` are the elements of this collection, the result is
+           | `op( op( ... op( op(z, x), x) ... ), x)`.
+           |
+           | If this collection is not ordered, then for each application of the operator, each
+           | right operand is an element. In addition, the leftmost operand is the initial
+           | value, and each other left operand is itself an application of the operator. The
+           | elements of this collection and the initial value all appear exactly once in the
+           | computation.
+           |
+           | Note: might return different results for different runs, unless the underlying collection type is ordered.
            | Note: will not terminate for infinite-sized collections.
-           | Note: might return different results for different runs, unless the
-           |underlying collection type is ordered or the operator is associative
-           |and commutative.
            |
            |
            |**Type Parameters**
-           |- `B`: the result type of the binary operator.
+           |- `B`: The result type of the binary operator.
            |
            |**Parameters**
-           |- `z`: the start value.
-           |- `op`: the binary operator.
+           |- `z`: An initial value.
+           |- `op`: A binary operator.
            |
-           |**Returns:** the result of inserting `op` between consecutive elements of this collection,
-           |          going left to right with the start value `z` on the left:
-           |          `op(...op(z, x), x, ..., x)` where `x, ..., x`
-           |          are the elements of this collection.
-           |          Returns `z` if this collection is empty.
+           |**Returns:** The result of applying `op` to `z` and all elements of this collection,
+           |                   going left to right. Returns `z` if this collection is empty.
            |foldLeft[B](z: B)(op: (B, Int) => B): B
            |                  ^^^^^^^^^^^^^^^^^
            |""".stripMargin
@@ -333,6 +371,14 @@ class SignatureHelpDocSuite extends BaseSignatureHelpSuite {
            |singleton[T](o: T): java.util.Set[T]
            |             ^^^^
            |  @param o o the sole object to be stored in the returned set.
+           |""".stripMargin,
+      ">=3.4.1-RC1-bin-20240120-hash-NIGHTLY" ->
+        """|Returns an immutable set containing only the specified object.
+           |The returned set is serializable.
+           |singleton[T](o: T): java.util.Set[T]
+           |             ^^^^
+           |  @param T <T> the class of the objects in the set
+           |  @param o o the sole object to be stored in the returned set.
            |""".stripMargin
     )
   )
@@ -383,6 +429,26 @@ class SignatureHelpDocSuite extends BaseSignatureHelpSuite {
            |  @param pf Partial function used when applying catch logic to determine result value
            |  @param fin Finally logic which if defined will be invoked after catch logic
            |  @param rethrow Predicate on throwables determining when to rethrow a caught [Throwable](Throwable)
+           |""".stripMargin,
+      ">=3.4.1-RC1-bin-20240120-hash-NIGHTLY" ->
+        """|A container class for catch/finally logic.
+           |
+           | Pass a different value for rethrow if you want to probably
+           | unwisely allow catching control exceptions and other throwables
+           | which the rest of the world may expect to get through.
+           |
+           |**Type Parameters**
+           |- `T`: result type of bodies used in try and catch blocks
+           |
+           |**Parameters**
+           |- `pf`: Partial function used when applying catch logic to determine result value
+           |- `fin`: Finally logic which if defined will be invoked after catch logic
+           |- `rethrow`: Predicate on throwables determining when to rethrow a caught [Throwable](Throwable)
+           |Catch[T](pf: Catcher[T], fin: Option[Finally], rethrow: Throwable => Boolean)
+           |         ^^^^^^^^^^^^^^
+           |  @param pf Partial function used when applying catch logic to determine result value
+           |  @param fin Finally logic which if defined will be invoked after catch logic
+           |  @param rethrow Predicate on throwables determining when to rethrow a caught [Throwable](Throwable)
            |""".stripMargin
     )
   )
@@ -405,7 +471,14 @@ class SignatureHelpDocSuite extends BaseSignatureHelpSuite {
                 |File(parent: java.io.File, child: String)
                 |File(parent: String, child: String)
                 |File(pathname: String)
-                |""".stripMargin
+                |""".stripMargin,
+      ">=3.4.1-RC1-bin-20240120-hash-NIGHTLY" ->
+        """|File(uri: URI)
+           |     ^^^^^^^^
+           |File(parent: File, child: String)
+           |File(parent: String, child: String)
+           |File(pathname: String)
+           |""".stripMargin
     )
   )
 

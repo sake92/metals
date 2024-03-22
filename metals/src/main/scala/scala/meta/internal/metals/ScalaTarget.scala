@@ -4,6 +4,7 @@ import java.nio.file.Path
 
 import scala.meta.Dialect
 import scala.meta.dialects._
+import scala.meta.internal.builds.BazelBuildTool
 import scala.meta.internal.builds.MillBuildTool
 import scala.meta.internal.metals.MetalsEnrichments._
 import scala.meta.internal.semver.SemVer
@@ -74,6 +75,7 @@ case class ScalaTarget(
    */
   private def semanticDbEnabledAlternatively = bspConnection.exists {
     buildServer =>
+      buildServer.name == BazelBuildTool.bspName ||
       buildServer.name == MillBuildTool.bspName &&
       SemVer.isCompatibleVersion(
         MillBuildTool.scalaSemanticDbSupport,
@@ -82,6 +84,11 @@ case class ScalaTarget(
   }
 
   def isAmmonite: Boolean = displayName.endsWith(".sc")
+
+  def semanticdbFilesPresent(): Boolean = targetroot
+    .resolve(Directories.semanticdb)
+    .listRecursive
+    .exists(_.isSemanticdb)
 
   def isSemanticdbEnabled: Boolean =
     scalac.isSemanticdbEnabled(scalaVersion) ||
@@ -107,7 +114,7 @@ case class ScalaTarget(
   private def containsSource3 =
     scalac.getOptions().asScala.exists(opt => opt.startsWith("-Xsource:3"))
 
-  def targetroot: AbsolutePath = scalac.targetroot(scalaVersion)
+  def targetroot: AbsolutePath = scalac.targetroot(scalaVersion).resolveIfJar
 
   def scalaPlatform: ScalaPlatform = scalaInfo.getPlatform()
 

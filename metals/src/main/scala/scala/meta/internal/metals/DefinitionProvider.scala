@@ -8,6 +8,7 @@ import scala.concurrent.Future
 import scala.meta.Term
 import scala.meta.Type
 import scala.meta.inputs.Input
+import scala.meta.inputs.Position.Range
 import scala.meta.internal.metals.MetalsEnrichments._
 import scala.meta.internal.mtags.GlobalSymbolIndex
 import scala.meta.internal.mtags.Mtags
@@ -16,7 +17,6 @@ import scala.meta.internal.mtags.Symbol
 import scala.meta.internal.mtags.SymbolDefinition
 import scala.meta.internal.parsing.TokenEditDistance
 import scala.meta.internal.parsing.Trees
-import scala.meta.internal.remotels.RemoteLanguageServer
 import scala.meta.internal.semanticdb
 import scala.meta.internal.semanticdb.IdTree
 import scala.meta.internal.semanticdb.OriginalTree
@@ -34,6 +34,7 @@ import org.eclipse.lsp4j.Location
 import org.eclipse.lsp4j.Position
 import org.eclipse.lsp4j.SymbolInformation
 import org.eclipse.lsp4j.SymbolKind
+import org.eclipse.lsp4j.TextDocumentIdentifier
 import org.eclipse.lsp4j.TextDocumentPositionParams
 
 /**
@@ -59,7 +60,6 @@ final class DefinitionProvider(
     semanticdbs: Semanticdbs,
     warnings: Warnings,
     compilers: () => Compilers,
-    remote: RemoteLanguageServer,
     trees: Trees,
     buildTargets: BuildTargets,
     scalaVersionSelector: ScalaVersionSelector,
@@ -96,22 +96,15 @@ final class DefinitionProvider(
       case _ =>
         DefinitionResult.empty
     }
-    val fromIndex =
-      if (fromSnapshot.isEmpty && remote.isEnabledForPath(path)) {
-        remote.definition(params).map(_.getOrElse(fromSnapshot))
-      } else {
-        Future.successful(fromSnapshot)
-      }
-    val fromCompilerOrSemanticdb = fromIndex.flatMap { result =>
-      if (result.isEmpty && path.isScalaFilename) {
+    val fromCompilerOrSemanticdb =
+      if (fromSnapshot.isEmpty && path.isScalaFilename) {
         compilers().definition(params, token)
       } else {
         if (fromSemanticdb.isEmpty) {
           warnings.noSemanticdb(path)
         }
-        Future.successful(result)
+        Future.successful(fromSnapshot)
       }
-    }
 
     fromCompilerOrSemanticdb.map { definition =>
       if (definition.isEmpty && !definition.symbol.endsWith("/")) {
@@ -127,6 +120,23 @@ final class DefinitionProvider(
         definition
       }
     }
+  }
+
+  def definition(
+      path: AbsolutePath,
+      pos: Int,
+  ): Future[DefinitionResult] = {
+    val text = path.readText
+    val input = new Input.VirtualFile(path.toURI.toString(), text)
+    val range = Range(input, pos, pos)
+    definition(
+      path,
+      new TextDocumentPositionParams(
+        new TextDocumentIdentifier(path.toURI.toString()),
+        range.toLsp.getStart(),
+      ),
+      EmptyCancelToken,
+    )
   }
 
   /**
@@ -148,7 +158,7 @@ final class DefinitionProvider(
       sourceText <- buffers.get(path)
       virtualFile = Input.VirtualFile(path.toURI.toString(), sourceText)
       metaPos <- pos.toMeta(virtualFile)
-      tokens <- trees.tokenized(virtualFile).toOption
+      tokens <- trees.tokenized(path)
       ident <- tokens.collectFirst {
         case id: Token.Ident if id.pos.encloses(metaPos) => id
       }
@@ -175,9 +185,8 @@ final class DefinitionProvider(
         else true
       }
 
-      val dialect = scalaVersionSelector.dialectFromBuildTarget(path)
       val locs = workspaceSearch
-        .searchExactFrom(ident.value, path, token, dialect)
+        .searchExactFrom(ident.value, path, token, Some(path))
 
       val reducedGuesses =
         if (locs.size > 1)

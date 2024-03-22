@@ -20,6 +20,8 @@ import scala.collection.mutable.ListBuffer
 import scala.concurrent.ExecutionContextExecutorService
 import scala.concurrent.Future
 import scala.concurrent.Promise
+import scala.util.Failure
+import scala.util.Success
 import scala.util.matching.Regex
 import scala.{meta => m}
 
@@ -635,6 +637,18 @@ final case class TestingServer(
     fullServer.executeCommand(command.toExecuteCommandParams()).asScala
   }
 
+  def listBuildTargets: Future[List[String]] = {
+    for {
+      targetsArray <- executeCommand(ServerCommands.ListBuildTargets)
+    } yield targetsArray.toJson.as[Array[String]] match {
+      case Failure(exception) =>
+        scribe.error("Could not read build targets", exception)
+        Nil
+      case Success(targets) =>
+        targets.toList
+    }
+  }
+
   /**
    * Operating on strings can be dangerous, but needed for running unknown commands
    * and for the StartDebugAdapter command, which doesn't have a stable argument.
@@ -657,6 +671,7 @@ final case class TestingServer(
       kind: String,
       parameter: AnyRef,
       stoppageHandler: Stoppage.Handler = Stoppage.Handler.Continue,
+      requestOtherThreadStackTrace: Boolean = false,
   ): Future[TestDebugger] = {
 
     assertSystemExit(parameter)
@@ -668,7 +683,11 @@ final case class TestingServer(
     executeCommandUnsafe(ServerCommands.StartDebugAdapter.id, Seq(params))
       .collect { case DebugSession(_, uri) =>
         scribe.info(s"Starting debug session for $uri")
-        TestDebugger(URI.create(uri), stoppageHandler)
+        TestDebugger(
+          URI.create(uri),
+          stoppageHandler,
+          requestOtherThreadStackTrace,
+        )
       }
   }
 
@@ -1025,11 +1044,15 @@ final case class TestingServer(
     } yield classes
   }
 
-  def codeLensesText(filename: String, printCommand: Boolean = false)(
+  def codeLensesText(
+      filename: String,
+      printCommand: Boolean = false,
+      minExpectedLenses: Int = 1,
+  )(
       maxRetries: Int
   ): Future[String] = {
     for {
-      lenses <- codeLenses(filename, maxRetries)
+      lenses <- codeLenses(filename, maxRetries, minExpectedLenses)
       textEdits = CodeLensesTextEdits(lenses, printCommand)
     } yield TextEdits.applyEdits(textContents(filename), textEdits.toList)
   }
@@ -1037,6 +1060,7 @@ final case class TestingServer(
   def codeLenses(
       filename: String,
       maxRetries: Int = 4,
+      minExpectedLenses: Int = 1,
   ): Future[List[l.CodeLens]] = {
     Debug.printEnclosing(filename)
     val path = toPath(filename)
@@ -1052,21 +1076,24 @@ final case class TestingServer(
     // or fails if it could nat be achieved withing [[maxRetries]] number of tries
     var retries = maxRetries
     val codeLenses = Promise[List[l.CodeLens]]()
+    def getLenses = fullServer
+      .codeLens(params)
+      .asScala
+      .map(_.asScala)
+      .withTimeout(10, util.concurrent.TimeUnit.SECONDS)
+      .recover { _ =>
+        scribe.info(s"Timeout for fetching lenses reached for $filename")
+        Nil
+      }
+
     val handler = { refreshCount: Int =>
       scribe.info(s"Refreshing model for $filename")
       if (refreshCount > 0)
         for {
-          lenses <- fullServer
-            .codeLens(params)
-            .asScala
-            .map(_.asScala)
-            .withTimeout(10, util.concurrent.TimeUnit.SECONDS)
-            .recover { _ =>
-              scribe.info(s"Timeout for fetching lenses reached for $filename")
-              Nil
-            }
+          lenses <- getLenses
         } {
-          if (lenses.nonEmpty) codeLenses.trySuccess(lenses.toList)
+          if (lenses.size >= minExpectedLenses)
+            codeLenses.trySuccess(lenses.toList)
           else if (retries > 0) {
             retries -= 1
             server.compilations.compileFile(path)
@@ -1077,17 +1104,19 @@ final case class TestingServer(
         }
     }
 
+    client.refreshModelHandler = handler
+
     for {
-      _ <-
-        fullServer
-          .didFocus(uri)
-          .asScala // model is refreshed only for focused document
-      _ = client.refreshModelHandler = handler
-      // first compilation, to trigger the handler
-      _ <- server.compilations.compileFile(path)
-      lenses <- codeLenses.future
+      // model is refreshed only for focused document
+      // this will also trigger compilation
+      _ <- fullServer.didFocus(uri).asScala
+      lenses <- getLenses
+        .flatMap { lenses =>
+          if (lenses.size >= minExpectedLenses) Future.successful(lenses)
+          else codeLenses.future
+        }
         .withTimeout(60, util.concurrent.TimeUnit.SECONDS)
-    } yield lenses
+    } yield lenses.toList
   }
 
   def formatCompletion(
@@ -1106,7 +1135,7 @@ final case class TestingServer(
         val shouldIncludeDetail = item.getDetail != null && includeDetail
         val detail =
           if (shouldIncludeDetail && !label.contains(item.getDetail))
-            item.getDetail
+            " " + item.getDetail
           else ""
         label + detail
       }
@@ -1387,6 +1416,53 @@ final case class TestingServer(
     }
   }
 
+  def assertInlayHints(
+      filename: String,
+      expected: String,
+      root: AbsolutePath = workspace,
+  )(implicit
+      location: munit.Location
+  ): Future[Unit] = {
+    val fileContent = TestInlayHints.removeInlayHints(expected)
+    assertInlayHints(filename, fileContent, expected, root)
+  }
+
+  def assertInlayHints(
+      filename: String,
+      fileContent: String,
+      expected: String,
+      root: AbsolutePath,
+  )(implicit
+      location: munit.Location
+  ): Future[Unit] = {
+    for {
+      hints <- inlayHints(filename, fileContent, root)
+    } yield {
+      Assertions.assertNoDiff(
+        TestInlayHints.applyInlayHints(fileContent, hints),
+        expected,
+      )
+    }
+  }
+
+  def inlayHints(
+      filename: String,
+      fileContent: String,
+      root: AbsolutePath = workspace,
+  ): Future[List[l.InlayHint]] = {
+    val path = root.resolve(filename)
+    val input = m.Input.String(fileContent)
+    path.touch()
+    val pos = m.Position.Range(input, 0, fileContent.length)
+    val uri = path.toTextDocumentIdentifier
+    val range = pos.toLsp
+    val params = new org.eclipse.lsp4j.InlayHintParams(uri, range)
+    for {
+      _ <- didSave(filename)(_ => fileContent)
+      inlayHints <- fullServer.inlayHints(params).asScala
+    } yield inlayHints.asScala.toList
+  }
+
   def assertHighlight(
       filename: String,
       query: String,
@@ -1534,12 +1610,19 @@ final case class TestingServer(
       base: Map[String, String],
   ): Future[Map[String, String]] = {
     Debug.printEnclosing()
+    implementation(filename, query).map(
+      TestRanges.renderLocationsAsString(base, _)
+    )
+  }
+
+  def implementation(
+      filename: String,
+      query: String,
+  ): Future[List[Location]] = {
     for {
       (_, params) <- offsetParams(filename, query, workspace)
       implementations <- fullServer.implementation(params).asScala
-    } yield {
-      TestRanges.renderLocationsAsString(base, implementations.asScala.toList)
-    }
+    } yield implementations.asScala.toList
   }
 
   def getReferenceLocations(

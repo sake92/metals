@@ -9,7 +9,7 @@ Global / onChangedBuildSource := ReloadOnSourceChanges
 Global / resolvers += "scala-integration" at
   "https://scala-ci.typesafe.com/artifactory/scala-integration/"
 
-def localSnapshotVersion = "1.2.1-SNAPSHOT"
+def localSnapshotVersion = "1.2.3-SNAPSHOT"
 def isCI = System.getenv("CI") != null
 
 def isScala211(v: Option[(Long, Long)]): Boolean = v.contains((2, 11))
@@ -19,6 +19,8 @@ def isScala2(v: Option[(Long, Long)]): Boolean = v.exists(_._1 == 2)
 def isScala3(v: Option[(Long, Long)]): Boolean = v.exists(_._1 == 3)
 def isScala3WithPresentationCompiler(v: String): Boolean =
   (Version.parse(v), Version.parse(V.firstScala3PCVersion)) match {
+    case (Some(v), _) if V.supportedScalaVersions.contains(v.toString()) =>
+      false
     case (Some(v), Some(firstScala3PCVersion)) => v >= firstScala3PCVersion
     case _ => false
   }
@@ -236,7 +238,7 @@ lazy val interfaces = project
     moduleName := "mtags-interfaces",
     autoScalaLibrary := false,
     mimaPreviousArtifacts := Set(
-      "org.scalameta" % "mtags-interfaces" % "1.0.1"
+      "org.scalameta" % "mtags-interfaces" % "1.2.1"
     ),
     crossPaths := false,
     libraryDependencies ++= List(
@@ -268,7 +270,7 @@ lazy val mtagsShared = project
     },
     libraryDependencies ++= List(
       "org.lz4" % "lz4-java" % "1.8.0",
-      "com.google.protobuf" % "protobuf-java" % "3.25.1",
+      "com.google.protobuf" % "protobuf-java" % "3.25.3",
       "io.get-coursier" % "interface" % V.coursierInterfaces,
     ),
   )
@@ -448,7 +450,7 @@ lazy val metals = project
       "com.swoval" % "file-tree-views" % "2.1.12",
       // for http client
       "io.undertow" % "undertow-core" % "2.2.20.Final",
-      "org.jboss.xnio" % "xnio-nio" % "3.8.12.Final",
+      "org.jboss.xnio" % "xnio-nio" % "3.8.13.Final",
       // for persistent data like "dismissed notification"
       "org.flywaydb" % "flyway-core" % "9.22.3",
       "com.h2database" % "h2" % "2.2.224",
@@ -496,10 +498,10 @@ lazy val metals = project
       // for logging
       "com.outr" %% "scribe" % V.scribe,
       "com.outr" %% "scribe-file" % V.scribe,
-      "com.outr" %% "scribe-slf4j" % V.scribe, // needed for flyway database migrations
+      "com.outr" %% "scribe-slf4j2" % V.scribe, // needed for flyway database migrations
       // for JSON formatted doctor
-      "com.lihaoyi" %% "ujson" % "3.1.3",
-      // For remote language server
+      "com.lihaoyi" %% "ujson" % "3.1.5",
+      // For fetching projects' templates
       "com.lihaoyi" %% "requests" % "0.8.0",
       // for producing SemanticDB from Scala source files, to be sure we want the same version of scalameta
       "org.scalameta" %% "scalameta" % V.semanticdb(scalaVersion.value),
@@ -524,9 +526,9 @@ lazy val metals = project
       "bloopConfigVersion" -> V.bloopConfig,
       "bloopNightlyVersion" -> V.bloop,
       "sbtBloopVersion" -> V.sbtBloop,
+      "gitter8Version" -> V.gitter8Version,
       "gradleBloopVersion" -> V.gradleBloop,
       "mavenBloopVersion" -> V.mavenBloop,
-      "gradleBloopVersion" -> V.gradleBloop,
       "scalametaVersion" -> V.scalameta,
       "semanticdbVersion" -> V.semanticdb(scalaVersion.value),
       "javaSemanticdbVersion" -> V.javaSemanticdb,
@@ -548,8 +550,10 @@ lazy val metals = project
       "ammonite212" -> V.ammonite212Version,
       "ammonite213" -> V.ammonite213Version,
       "ammonite3" -> V.ammonite3Version,
+      "bazelScalaVersion" -> V.bazelScalaVersion,
       "scala213" -> V.scala213,
       "scala3" -> V.scala3,
+      "firstScala3PCVersion" -> V.firstScala3PCVersion,
       "lastSupportedSemanticdb" -> SemanticDbSupport.last,
     ),
   )
@@ -594,7 +598,7 @@ lazy val input3 = project
   .settings(
     sharedSettings,
     scalaVersion := V.scala3,
-    target := (ThisBuild / baseDirectory).value / "input" / "target" / "target3",
+    target := (ThisBuild / baseDirectory).value / "tests" / "input" / "target" / "target3",
     Compile / unmanagedSourceDirectories := Seq(
       (input / baseDirectory).value / "src" / "main" / "scala",
       (input / baseDirectory).value / "src" / "main" / "scala-3",
@@ -681,10 +685,14 @@ lazy val mtest = project
   .settings(
     testSettings,
     sharedSettings,
-    libraryDependencies ++= List(
-      "org.scalameta" %% "munit" % V.munit,
-      "io.get-coursier" % "interface" % V.coursierInterfaces,
-    ),
+    libraryDependencies ++=
+      List(
+        "org.scalameta" %% "munit" % {
+          if (scalaVersion.value.startsWith("2.11")) "1.0.0-M10"
+          else V.munit
+        },
+        "io.get-coursier" % "interface" % V.coursierInterfaces,
+      ),
     buildInfoPackage := "tests",
     buildInfoObject := "BuildInfoVersions",
     buildInfoKeys := Seq[BuildInfoKey](
@@ -714,7 +722,10 @@ lazy val mtest = project
     Compile / unmanagedSourceDirectories ++= {
       val base = (mtags / Compile / sourceDirectory).value
       if (isScala3WithPresentationCompiler(scalaVersion.value)) {
-        List(base / "scala")
+        List(
+          base / "scala",
+          base / "scala-3" / "scala" / "meta" / "internal" / "metals",
+        )
       } else {
         Nil
       }
@@ -767,7 +778,8 @@ lazy val metalsDependencies = project
       // The dependencies listed below are only listed so Scala Steward
       // will pick them up and update them. They aren't actually used.
       "com.lihaoyi" %% "ammonite-util" % V.ammonite,
-      "org.typelevel" % "kind-projector" % V.kindProjector cross CrossVersion.full,
+      // not available for Scala 2.13.13
+      // "org.typelevel" % "kind-projector" % V.kindProjector cross CrossVersion.full,
       "com.olegpy" %% "better-monadic-for" % V.betterMonadicFor,
       "com.lihaoyi" % "mill-contrib-testng" % V.mill,
       "org.virtuslab.scala-cli" % "cli_3" % V.scalaCli intransitive (),
@@ -775,6 +787,7 @@ lazy val metalsDependencies = project
       "ch.epfl.scala" %% "gradle-bloop" % V.gradleBloop,
       "com.sourcegraph" % "semanticdb-java" % V.javaSemanticdb,
       "ch.epfl.scala" %% "scala-debug-adapter" % V.debugAdapter intransitive (),
+      "org.foundweekends.giter8" %% "giter8" % V.gitter8Version intransitive (),
     ),
   )
   .disablePlugins(ScalafixPlugin)

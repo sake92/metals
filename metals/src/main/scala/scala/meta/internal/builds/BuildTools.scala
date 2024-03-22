@@ -7,6 +7,7 @@ import java.util.concurrent.atomic.AtomicReference
 import scala.meta.internal.bsp.ScalaCliBspScope
 import scala.meta.internal.io.PathIO
 import scala.meta.internal.metals.BloopServers
+import scala.meta.internal.metals.Directories
 import scala.meta.internal.metals.MetalsEnrichments._
 import scala.meta.internal.metals.UserConfiguration
 import scala.meta.internal.metals.scalacli.ScalaCli
@@ -48,18 +49,26 @@ final class BuildTools(
       .map(isBloop)
       .getOrElse(
         isBloop
-      ) || (isBsp && all.isEmpty) || (isBsp && explicitChoiceMade()) || (isBsp && isBazel)
+      ) || (isBsp && all.isEmpty) || (isBsp && explicitChoiceMade())
   }
   def isBloop(root: AbsolutePath): Boolean = hasJsonFile(root.resolve(".bloop"))
   def bloopProject: Option[AbsolutePath] = searchForBuildTool(isBloop)
   def isBloop: Boolean = bloopProject.isDefined
   def isBsp: Boolean = {
-    hasJsonFile(workspace.resolve(".bsp")) ||
-    customProjectRoot.exists(root => hasJsonFile(root.resolve(".bsp"))) ||
+    hasJsonFile(workspace.resolve(Directories.bsp)) ||
+    customProjectRoot.exists(root =>
+      hasJsonFile(root.resolve(Directories.bsp))
+    ) ||
     bspGlobalDirectories.exists(hasJsonFile)
   }
   private def hasJsonFile(dir: AbsolutePath): Boolean = {
     dir.list.exists(_.extension == "json")
+  }
+
+  def isBazelBsp: Boolean = {
+    workspace.resolve(Directories.bazelBsp).isDirectory &&
+    BazelBuildTool.existingProjectView(workspace).nonEmpty &&
+    isBsp
   }
 
   // Returns true if there's a build.sbt file or project/build.properties with sbt.version
@@ -81,6 +90,10 @@ final class BuildTools(
     _.resolve("build.sc").isFile
   )
   def isMill: Boolean = millProject.isDefined
+  def isMillBsp(path: AbsolutePath): Boolean =
+    isInBsp(path) && path.filename.contains("mill") &&
+      path.filename.endsWith(".json")
+
   def scalaCliProject: Option[AbsolutePath] =
     searchForBuildTool(_.resolve("project.scala").isFile)
       .orElse {
@@ -114,19 +127,19 @@ final class BuildTools(
     _.resolve("pom.xml").isFile
   )
   def isMaven: Boolean = mavenProject.isDefined
-  def pantsProject: Option[AbsolutePath] = searchForBuildTool(
-    _.resolve("pants.ini").isFile
-  )
-  def isPants: Boolean = pantsProject.isDefined
   def bazelProject: Option[AbsolutePath] = searchForBuildTool(
     _.resolve("WORKSPACE").isFile
   )
   def isBazel: Boolean = bazelProject.isDefined
 
+  def isInBsp(path: AbsolutePath): Boolean =
+    path.isFile && path.parent.filename == ".bsp" &&
+      path.filename.endsWith(".json")
+
   private def customBsps: List[BspOnly] = {
     val bspFolders =
       (workspace :: customProjectRoot.toList).distinct
-        .map(_.resolve(".bsp")) ++ bspGlobalDirectories
+        .map(_.resolve(Directories.bsp)) ++ bspGlobalDirectories
     val root = customProjectRoot.getOrElse(workspace)
     for {
       bspFolder <- bspFolders
@@ -148,7 +161,11 @@ final class BuildTools(
   }
 
   private def knownBsps =
-    Set(SbtBuildTool.name, MillBuildTool.name) ++ ScalaCli.names
+    Set(
+      SbtBuildTool.name,
+      MillBuildTool.bspName,
+      BazelBuildTool.bspName,
+    ) ++ ScalaCli.names
 
   private def customProjectRoot = userConfig().getCustomProjectRoot(workspace)
 
@@ -180,6 +197,7 @@ final class BuildTools(
       MavenBuildTool(userConfig, workspace),
       MillBuildTool(userConfig, workspace),
       ScalaCliBuildTool(workspace, workspace, userConfig),
+      BazelBuildTool(userConfig, workspace),
     )
   }
 
@@ -190,7 +208,6 @@ final class BuildTools(
     if (isMill) buf += "Mill"
     if (isGradle) buf += "Gradle"
     if (isMaven) buf += "Maven"
-    if (isPants) buf += "Pants"
     if (isBazel) buf += "Bazel"
     buf.result()
   }
@@ -207,6 +224,7 @@ final class BuildTools(
     mavenProject.foreach(buf += MavenBuildTool(userConfig, _))
     millProject.foreach(buf += MillBuildTool(userConfig, _))
     scalaCliProject.foreach(buf += ScalaCliBuildTool(workspace, _, userConfig))
+    bazelProject.foreach(buf += BazelBuildTool(userConfig, _))
     buf.addAll(customBsps)
 
     buf.result()
@@ -229,12 +247,13 @@ final class BuildTools(
       Some(MavenBuildTool.name)
     else if (isMill && MillBuildTool.isMillRelatedPath(path))
       Some(MillBuildTool.name)
-    else if (
-      path.isFile && path.filename.endsWith(".json") &&
-      path.parent.filename == ".bsp"
-    )
-      Some(path.filename.stripSuffix(".json"))
-    else None
+    else if (bazelProject.exists(BazelBuildTool.isBazelRelatedPath(_, path)))
+      Some(BazelBuildTool.name)
+    else if (isInBsp(path)) {
+      val name = path.filename.stripSuffix(".json")
+      if (knownBsps(name) && !ScalaCli.names(name)) None
+      else Some(name)
+    } else None
   }
 
   def initialize(): Set[String] = {

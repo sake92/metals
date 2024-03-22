@@ -311,7 +311,7 @@ class MetalsGlobal(
                 !metalsConfig.isDefaultSymbolPrefixes || hasConflictingMembersInScope
 
               if (shouldRenamePrefix) {
-                val existingRename = history.renames.get(ownerSym)
+                val existingRename = history.rename(ownerSym)
                 existingRename.isEmpty && history.tryShortenName(
                   ShortName(rename, ownerSymbol)
                 )
@@ -329,9 +329,8 @@ class MetalsGlobal(
                   args.map(arg => loop(arg, None))
                 )
               case _ =>
-                history.renames.get(sym) match {
-                  case Some(rename)
-                      if history.nameResolvesToSymbol(rename, sym) =>
+                history.rename(sym) match {
+                  case Some(rename) =>
                     TypeRef(
                       NoPrefix,
                       sym.newErrorSymbol(rename),
@@ -362,6 +361,13 @@ class MetalsGlobal(
                           args.map(arg => loop(arg, None))
                         )
                       }
+                    } else if (sym.isMethod && sym.safeOwner.isImplicit) {
+                      history.tryShortenName(ShortName(sym.safeOwner))
+                      TypeRef(
+                        NoPrefix,
+                        shortSymbol,
+                        args.map(arg => loop(arg, None))
+                      )
                     } else {
                       TypeRef(
                         loop(pre, Some(ShortName(sym))),
@@ -411,7 +417,7 @@ class MetalsGlobal(
           // to make sure we always use renamed package
           // what is saved in renames is actually companion module of a package
           val renamedOwnerIndex =
-            owners.indexWhere(s => history.renames.contains(s.companionModule))
+            owners.indexWhere(s => history.rename(s.companionModule).nonEmpty)
           if (renamedOwnerIndex < 0 && history.tryShortenName(name)) NoPrefix
           else {
             val prefix =
@@ -434,8 +440,8 @@ class MetalsGlobal(
                 .reverse
                 .map(s =>
                   m.Term.Name(
-                    history.renames
-                      .get(s.companionModule)
+                    history
+                      .rename(s.companionModule)
                       .map(_.toString())
                       .getOrElse(s.nameSyntax)
                   )
@@ -1054,6 +1060,13 @@ class MetalsGlobal(
       case _ => false
     }
 
+  def enclosedChildren(tree: Tree, pos: Position): List[Tree] = {
+    tree.children
+      .filter(c =>
+        c.pos.isDefined && c.pos.start <= pos.end && c.pos.end >= pos.start
+      )
+  }
+
   // Extractor for both term and type applications like `foo(1)` and foo[T]`
   object TreeApply {
     def unapply(tree: Tree): Option[(Tree, List[Tree])] =
@@ -1064,6 +1077,37 @@ class MetalsGlobal(
         case AppliedTypeTree(qual, args) => Some(qual -> args)
         case _ => None
       }
+  }
+
+  /**
+   * Creates a bounded wildcard type for a type of parameter
+   * using information about type parameters.
+   *
+   * E.g. for class A[T](x: List[T])
+   * List[Int] <:< List[T] is false,
+   * this method for List[T] will return List[_ >: Nothing <: Any],
+   * and List[Int] <:< List[_ >: Nothing <: Any] is true.
+   */
+  def boundedWildcardType(
+      tpe: Type,
+      typeParams: List[Symbol]
+  ): Type = {
+    if (typeParams.isEmpty) tpe
+    else {
+      typeParams.find(_ == tpe.typeSymbol) match {
+        case Some(tpeDef) =>
+          tpeDef.info match {
+            case bounds: TypeBounds => BoundedWildcardType(bounds)
+            case tpe => tpe
+          }
+        case None =>
+          tpe match {
+            case TypeRef(pre, sym, args) =>
+              TypeRef(pre, sym, args.map(boundedWildcardType(_, typeParams)))
+            case t => t
+          }
+      }
+    }
   }
 
 }

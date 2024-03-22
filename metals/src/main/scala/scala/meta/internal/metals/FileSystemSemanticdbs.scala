@@ -40,14 +40,19 @@ final class FileSystemSemanticdbs(
           javaRoot orElse buildTargets.scalaTargetRoot(buildTarget)
         }
       } yield {
-        (workspace, targetroot)
+        val optScalaVersion =
+          if (file.toLanguage.isJava) None
+          else buildTargets.scalaTarget(buildTarget).map(_.scalaVersion)
+
+        (workspace, targetroot, optScalaVersion)
       }
 
       paths match {
-        case Some((ws, targetroot)) =>
+        case Some((ws, targetroot, optScalaVersion)) =>
           Semanticdbs.loadTextDocument(
             file,
             ws,
+            optScalaVersion,
             charset,
             fingerprints,
             semanticdbRelativePath =>
@@ -70,7 +75,7 @@ final class FileSystemSemanticdbs(
     if (semanticdbpath.isFile) Some(FoundSemanticDbPath(semanticdbpath, None))
     else {
       // needed in case sources are symlinked,
-      for {
+      val result = for {
         sourceRoot <- buildTargets.originalInverseSourceItem(file)
         relativeSourceRoot = sourceRoot.toRelative(workspace)
         relativeFile = file.toRelative(sourceRoot.dealias)
@@ -86,6 +91,11 @@ final class FileSystemSemanticdbs(
         alternativeSemanticdbPath,
         Some(fullRelativePath),
       )
+      if (result.isEmpty)
+        scribe.debug(
+          s"No text document found at for $file expected at ${semanticdbpath}"
+        )
+      result
     }
 
   }

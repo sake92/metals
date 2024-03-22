@@ -136,7 +136,7 @@ case class MillBuildTool(
       workspace: AbsolutePath
   ): Option[List[String]] =
     Option.when(workspaceSupportsBsp(workspace: AbsolutePath)) {
-      val cmd = "mill.bsp.BSP/install" :: Nil
+      val cmd = "mill.bsp.BSP/install" :: "--jobs" :: "0" :: Nil
       putTogetherArgs(cmd, getMillVersion(projectRoot), workspace)
     }
 
@@ -157,7 +157,7 @@ case class MillBuildTool(
     }
   }
 
-  override val buildServerName: Option[String] = Some(MillBuildTool.bspName)
+  override def buildServerName: String = MillBuildTool.bspName
 }
 
 object MillBuildTool {

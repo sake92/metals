@@ -6,6 +6,7 @@
       "editors/vim",
       "editors/sublime",
       "editors/emacs",
+      "editors/helix",
       "editors/online-ides",
       "editors/user-configuration"
     ],
@@ -15,6 +16,7 @@
     ],
     "Build Tools": [
       "build-tools/overview",
+      "build-tools/bazel",
       "build-tools/bloop",
       "build-tools/gradle",
       "build-tools/maven",
@@ -28,7 +30,6 @@
       "contributors/releasing"
     ],
     "Integrating with Metals": [
-      "integrations/remote-language-server",
       "integrations/new-build-tool",
       "integrations/new-editor",
       "integrations/test-explorer",

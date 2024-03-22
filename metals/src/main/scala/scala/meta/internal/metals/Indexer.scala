@@ -24,11 +24,13 @@ import scala.meta.internal.builds.BuildTool
 import scala.meta.internal.builds.BuildTools
 import scala.meta.internal.builds.Digest.Status
 import scala.meta.internal.builds.WorkspaceReload
+import scala.meta.internal.implementation.ImplementationProvider
 import scala.meta.internal.metals.MetalsEnrichments._
 import scala.meta.internal.metals.clients.language.DelegatingLanguageClient
 import scala.meta.internal.metals.clients.language.ForwardingMetalsBuildClient
 import scala.meta.internal.metals.debug.BuildTargetClasses
 import scala.meta.internal.metals.watcher.FileWatcher
+import scala.meta.internal.mtags.IndexingResult
 import scala.meta.internal.mtags.OnDemandSymbolIndex
 import scala.meta.internal.semanticdb.Scala._
 import scala.meta.internal.tvp.FolderTreeViewProvider
@@ -80,6 +82,7 @@ final case class Indexer(
     scalaVersionSelector: ScalaVersionSelector,
     sourceMapper: SourceMapper,
     workspaceFolder: AbsolutePath,
+    implementationProvider: ImplementationProvider,
 )(implicit rc: ReportContext) {
 
   private implicit def ec: ExecutionContextExecutorService = executionContext
@@ -95,7 +98,8 @@ final case class Indexer(
       workspaceReload().persistChecksumStatus(Status.Started, buildTool)
 
       buildTool match {
-        case _: BspOnly => reconnectToBuildServer()
+        case _: BspOnly =>
+          reconnectToBuildServer()
         case _ =>
           session
             .workspaceReload()
@@ -120,8 +124,10 @@ final case class Indexer(
 
     bspSession() match {
       case None =>
-        scribe.warn("No build session currently active to reload.")
-        Future.successful(BuildChange.None)
+        scribe.warn(
+          "No build session currently active to reload. Attempting to reconnect."
+        )
+        reconnectToBuildServer()
       case Some(session) if forceRefresh => reloadAndIndex(session)
       case Some(session) =>
         workspaceReload().oldReloadResult(checksum) match {
@@ -129,21 +135,25 @@ final case class Indexer(
             scribe.info(s"Skipping reload with status '${status.name}'")
             Future.successful(BuildChange.None)
           case None =>
-            for {
-              userResponse <- workspaceReload().requestReload(
-                buildTool,
-                checksum,
-              )
-              installResult <- {
-                if (userResponse.isYes) {
-                  reloadAndIndex(session)
-                } else {
-                  tables.dismissedNotifications.ImportChanges
-                    .dismiss(2, TimeUnit.MINUTES)
-                  Future.successful(BuildChange.None)
+            if (userConfig().automaticImportBuild == AutoImportBuildKind.All) {
+              reloadAndIndex(session)
+            } else {
+              for {
+                userResponse <- workspaceReload().requestReload(
+                  buildTool,
+                  checksum,
+                )
+                installResult <- {
+                  if (userResponse.isYes) {
+                    reloadAndIndex(session)
+                  } else {
+                    tables.dismissedNotifications.ImportChanges
+                      .dismiss(2, TimeUnit.MINUTES)
+                    Future.successful(BuildChange.None)
+                  }
                 }
-              }
-            } yield installResult
+              } yield installResult
+            }
         }
     }
   }
@@ -206,6 +216,7 @@ final case class Indexer(
         val data = buildTool.data
         val importedBuild = buildTool.importedBuild
         data.reset()
+        buildTargetClasses.clear()
         data.addWorkspaceBuildTargets(importedBuild.workspaceBuildTargets)
         data.addScalacOptions(
           importedBuild.scalacOptions,
@@ -214,6 +225,10 @@ final case class Indexer(
         data.addJavacOptions(
           importedBuild.javacOptions,
           bspSession().map(_.mainConnection),
+        )
+
+        data.addDependencyModules(
+          importedBuild.dependencyModules
         )
 
         // For "wrapped sources", we create dedicated TargetData.MappedSource instances,
@@ -461,7 +476,7 @@ final case class Indexer(
     } {
       isVisited.add(sourceUri)
       try {
-        if (path.isJar) {
+        if (path.isJar && path.exists) {
           usedJars += path
           addSourceJarSymbols(path)
         } else if (path.isDirectory) {
@@ -474,6 +489,7 @@ final case class Indexer(
               )
             )
             .getOrElse(Scala213)
+
           definitionIndex.addSourceDirectory(path, dialect)
         } else {
           scribe.warn(s"unexpected dependency: $path")
@@ -603,14 +619,36 @@ final case class Indexer(
    * @param path JAR path
    */
   private def addSourceJarSymbols(path: AbsolutePath): Unit = {
+    val dialect = ScalaVersions.dialectForDependencyJar(path.filename)
+    def indexJar() = {
+      val indexResult = definitionIndex.addSourceJar(path, dialect)
+      val toplevels = indexResult.flatMap {
+        case IndexingResult(path, toplevels, _) =>
+          toplevels.map((_, path))
+      }
+      val overrides = indexResult.flatMap {
+        case IndexingResult(path, _, list) =>
+          list.flatMap { case (symbol, overridden) =>
+            overridden.map((path, symbol, _))
+          }
+      }
+      implementationProvider.addTypeHierarchyElements(overrides)
+      (toplevels, overrides)
+    }
+
     tables.jarSymbols.getTopLevels(path) match {
       case Some(toplevels) =>
-        val dialect = ScalaVersions.dialectForDependencyJar(path.filename)
-        definitionIndex.addIndexedSourceJar(path, toplevels, dialect)
+        tables.jarSymbols.getTypeHierarchy(path) match {
+          case Some(overrides) =>
+            definitionIndex.addIndexedSourceJar(path, toplevels, dialect)
+            implementationProvider.addTypeHierarchyElements(overrides)
+          case None =>
+            val (_, overrides) = indexJar()
+            tables.jarSymbols.addTypeHierarchyInfo(path, overrides)
+        }
       case None =>
-        val dialect = ScalaVersions.dialectForDependencyJar(path.filename)
-        val toplevels = definitionIndex.addSourceJar(path, dialect)
-        tables.jarSymbols.putTopLevels(path, toplevels)
+        val (toplevels, overrides) = indexJar()
+        tables.jarSymbols.putJarIndexingInfo(path, toplevels, overrides)
     }
   }
 

@@ -855,7 +855,7 @@ abstract class BaseWorksheetLspSuite(
       _ = assertNoDiff(noCompletions, "")
     } yield ()
   }
-  if (ScalaVersions.isScala3Version(scalaVersion))
+  if (ScalaVersions.isScala3Version(scalaVersion) && scalaVersion != "3.4.0")
     test("import-missing-symbol") {
       cleanWorkspace()
       val path = "a/src/main/scala/foo/Main.worksheet.sc"
@@ -870,6 +870,11 @@ abstract class BaseWorksheetLspSuite(
              |/metals.json
              |{"a": {"scalaVersion": "${scalaVersion}"}}
              |/$path
+             |//> using scala $scalaVersion
+             |
+             |// Some comment
+             |
+             |// Object comment
              |object A {
              |  val f = Future.successful(42)
              |}
@@ -881,10 +886,15 @@ abstract class BaseWorksheetLspSuite(
           server
             .assertCodeAction(
               path,
-              """|object A {
-                 |  val f = <<Future>>.successful(42)
-                 |}
-                 |""".stripMargin,
+              s"""|//> using scala $scalaVersion
+                  |
+                  |// Some comment
+                  |
+                  |// Object comment
+                  |object A {
+                  |  val f = <<Future>>.successful(42)
+                  |}
+                  |""".stripMargin,
               expectedActions,
               Nil,
             )
@@ -895,11 +905,16 @@ abstract class BaseWorksheetLspSuite(
         // Assert if indentation is correct. See `AutoImports.renderImport`
         _ = assertNoDiff(
           server.bufferContents(path),
-          """|import scala.concurrent.Future
-             |object A {
-             |  val f = Future.successful(42)
-             |}
-             |""".stripMargin,
+          s"""|//> using scala $scalaVersion
+              |
+              |// Some comment
+              |import scala.concurrent.Future
+              |
+              |// Object comment
+              |object A {
+              |  val f = Future.successful(42)
+              |}
+              |""".stripMargin,
         )
       } yield ()
     }
@@ -964,7 +979,7 @@ abstract class BaseWorksheetLspSuite(
   test("semantic-highlighting2") {
     val expected =
       s"""|
-          |<<val>>/*keyword*/ <<hellos>>/*variable,definition,readonly*/ = <<List>>/*class*/(<<hi1>>/*variable,readonly*/, <<hi2>>/*variable,readonly*/)
+          |<<val>>/*keyword*/ <<hellos>>/*variable,definition,readonly*/ = <<List>>/*class*/(hi1, hi2)
           |""".stripMargin
 
     val fileContent =

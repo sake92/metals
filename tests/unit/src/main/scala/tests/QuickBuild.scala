@@ -147,9 +147,11 @@ case class QuickBuild(
           scalaVersion
         ) && !ScalaVersions.isScala3Version(scalaVersion)
       ) {
-        val semanticdbVersion = BuildInfoVersions.lastSupportedSemanticdb(
-          scalaVersion
-        )
+        val semanticdbVersion =
+          BuildInfoVersions.lastSupportedSemanticdb.getOrElse(
+            scalaVersion,
+            V.scalametaVersion,
+          )
         s"org.scalameta:::semanticdb-scalac:$semanticdbVersion" :: compilerPlugins.toList
       } else compilerPlugins.toList
     val pluginDependencies = allPlugins.map(plugin =>
@@ -284,6 +286,9 @@ object QuickBuild {
     ),
     "org.scalameta::munit" -> Config.TestFramework.munit,
     "junit:junit" -> Config.TestFramework.JUnit,
+    "com.disneystreaming::weaver-cats" -> Config.TestFramework(
+      List("weaver.framework.CatsEffect")
+    ),
   )
 
   /**

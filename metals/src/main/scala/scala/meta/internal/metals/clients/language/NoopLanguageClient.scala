@@ -8,8 +8,10 @@ import scala.meta.internal.tvp._
 import org.eclipse.lsp4j.ExecuteCommandParams
 import org.eclipse.lsp4j.MessageActionItem
 import org.eclipse.lsp4j.MessageParams
+import org.eclipse.lsp4j.ProgressParams
 import org.eclipse.lsp4j.PublishDiagnosticsParams
 import org.eclipse.lsp4j.ShowMessageRequestParams
+import org.eclipse.lsp4j.WorkDoneProgressCreateParams
 
 /**
  * A language client that ignores all requests.
@@ -62,6 +64,16 @@ abstract class NoopLanguageClient extends MetalsLanguageClient {
   override def refreshSemanticTokens(): CompletableFuture[Void] =
     CompletableFuture.completedFuture(null)
 
+  override def createProgress(
+      params: WorkDoneProgressCreateParams
+  ): CompletableFuture[Void] =
+    CompletableFuture.completedFuture(null)
+
+  override def notifyProgress(params: ProgressParams): Unit = ()
+
+  override def refreshInlayHints(): CompletableFuture[Void] = {
+    CompletableFuture.completedFuture(null)
+  }
 }
 
 object NoopLanguageClient extends NoopLanguageClient

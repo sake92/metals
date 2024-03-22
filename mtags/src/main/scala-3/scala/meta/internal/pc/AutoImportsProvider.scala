@@ -16,7 +16,7 @@ import dotty.tools.dotc.core.Symbols.*
 import dotty.tools.dotc.interactive.Interactive
 import dotty.tools.dotc.interactive.InteractiveDriver
 import dotty.tools.dotc.util.SourceFile
-import org.eclipse.{lsp4j as l}
+import org.eclipse.lsp4j as l
 
 final class AutoImportsProvider(
     search: SymbolSearch,
@@ -34,7 +34,7 @@ final class AutoImportsProvider(
       uri,
       SourceFile.virtual(filePath.toString, params.text),
     )
-    val unit = driver.currentCtx.run.units.head
+    val unit = driver.latestRun
     val tree = unit.tpdTree
 
     val pos = driver.sourcePosition(params)
@@ -44,7 +44,7 @@ final class AutoImportsProvider(
       Interactive.pathTo(newctx.compilationUnit.tpdTree, pos.span)(using newctx)
 
     val indexedContext = IndexedContext(
-      MetalsInteractive.contextOfPath(path)(using newctx)
+      Interactive.contextOfPath(path)(using newctx)
     )
     import indexedContext.ctx
 

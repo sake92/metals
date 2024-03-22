@@ -41,6 +41,9 @@ trait Completions { this: MetalsGlobal =>
     def editRange: Option[l.Range] = None
   }
 
+  class WorkspaceImplicitMember(sym: Symbol)
+      extends ScopeMember(sym, sym.tpe, true, EmptyTree)
+
   class WorkspaceInterpolationMember(
       sym: Symbol,
       override val additionalTextEdits: List[l.TextEdit],
@@ -76,19 +79,21 @@ trait Completions { this: MetalsGlobal =>
 
   val packageSymbols: mutable.Map[String, Option[Symbol]] =
     mutable.Map.empty[String, Option[Symbol]]
-  def packageSymbolFromString(symbol: String): Option[Symbol] = {
-    packageSymbols.getOrElseUpdate(
-      symbol, {
-        val fqn = symbol.stripSuffix("/").replace('/', '.')
-        try {
-          Some(rootMirror.staticPackage(fqn))
-        } catch {
-          case NonFatal(_) =>
-            None
+  def packageSymbolFromString(symbol: String): Option[Symbol] =
+    if (symbol == "_empty_/") Some(rootMirror.EmptyPackage)
+    else {
+      packageSymbols.getOrElseUpdate(
+        symbol, {
+          val fqn = symbol.stripSuffix("/").replace('/', '.')
+          try {
+            Some(rootMirror.staticPackage(fqn))
+          } catch {
+            case NonFatal(_) =>
+              None
+          }
         }
-      }
-    )
-  }
+      )
+    }
 
   /**
    * Returns a high number for less relevant symbols and low number for relevant numbers.

@@ -50,8 +50,10 @@ object MtagsResolver {
     "2.13.2" -> "0.11.10",
     "2.13.3" -> "0.11.12",
     "2.13.4" -> "1.0.1",
+    "2.13.5" -> "1.2.2",
     "2.12.9" -> "0.11.10",
     "2.12.10" -> "0.11.12",
+    "2.12.11" -> "1.2.2",
     "3.0.0" -> "0.11.10",
     "3.0.1" -> "0.11.10",
     "3.0.2" -> "0.11.12",
@@ -69,11 +71,15 @@ object MtagsResolver {
     "3.3.1-RC5" -> "1.0.0",
     "3.3.1-RC6" -> "1.0.1",
     "3.3.1-RC7" -> "1.0.1",
+    "3.3.0" -> "1.2.2",
+    "3.3.2-RC1" -> "1.2.2",
+    "3.3.2-RC2" -> "1.2.2",
+    "3.3.2-RC3" -> "1.2.2",
   )
 
   class Default extends MtagsResolver {
 
-    private val firstScala3PCVersion = "3.3.2-RC1-bin-20230706-3ae2dbf-NIGHTLY"
+    private val firstScala3PCVersion = BuildInfo.firstScala3PCVersion
     private val states =
       new ConcurrentHashMap[String, State]()
 
@@ -100,17 +106,6 @@ object MtagsResolver {
         original: Option[String],
         resolveType: ResolveType.Value = ResolveType.Regular,
     ): Option[MtagsBinaries] = {
-      def logError(e: Throwable): Unit = {
-        val msg = s"Failed to fetch mtags for ${scalaVersion}"
-        e match {
-          case _: SimpleResolutionError =>
-            // no need to log traces for coursier error
-            // all explanation is in message
-            scribe.error(msg + "\n" + e.getMessage())
-          case _ =>
-            scribe.error(msg, e)
-        }
-      }
 
       def fetch(tries: Int = 0): State = logResolution {
         try {
@@ -138,8 +133,7 @@ object MtagsResolver {
           )
         } catch {
           case NonFatal(e) =>
-            logError(e)
-            State.Failure(System.currentTimeMillis(), tries)
+            State.Failure(System.currentTimeMillis(), tries, e)
         }
       }
       def shouldResolveAgain(failure: State.Failure): Boolean = {
@@ -196,6 +190,18 @@ object MtagsResolver {
           },
         )
 
+        def logError(e: Throwable): Unit = {
+          val msg = s"Failed to fetch mtags for ${scalaVersion}"
+          e match {
+            case _: SimpleResolutionError =>
+              // no need to log traces for coursier error
+              // all explanation is in message
+              scribe.error(msg + "\n" + e.getMessage())
+            case _ =>
+              scribe.error(msg, e)
+          }
+        }
+
         computed match {
           case State.Success(v) =>
             Some(v)
@@ -226,8 +232,10 @@ object MtagsResolver {
                   ResolveType.Nightly,
                 )
             }
-          case _ =>
+          case failure: State.Failure =>
+            logError(failure.exception)
             None
+          case _ => None
         }
       }
     }
@@ -291,7 +299,8 @@ object MtagsResolver {
     object State {
       val maxTriesInARow: Int = 2
       case class Success(v: MtagsBinaries.Artifacts) extends State
-      case class Failure(lastTryMillis: Long, tries: Int) extends State
+      case class Failure(lastTryMillis: Long, tries: Int, exception: Throwable)
+          extends State
     }
   }
 

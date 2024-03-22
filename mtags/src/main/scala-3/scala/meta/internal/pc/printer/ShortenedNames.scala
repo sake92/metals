@@ -1,6 +1,6 @@
 package scala.meta.internal.pc.printer
 
-import java.{util as ju}
+import java.util as ju
 
 import scala.annotation.tailrec
 
@@ -28,6 +28,16 @@ class ShortenedNames(
   import ShortenedNames.*
 
   private val history = collection.mutable.Map.empty[Name, ShortName]
+
+  private val foundRenames = collection.mutable.Map.empty[Symbol, String]
+
+  def getUsedRenamesInfo(using Context): List[String] =
+    foundRenames.map { (from, to) =>
+      s"type $to = ${from.showName}"
+    }.toList
+
+  def getUsedRenames(using Context): Map[Symbol, String] =
+    foundRenames.toMap.filter { case (k, v) => k.showName != v }
 
   /**
    * Returns a list of shortened names
@@ -137,6 +147,7 @@ class ShortenedNames(
                   // for example, we have `import java.lang.{Boolean => JBoolean}` and
                   // complete `java.lang.Boolean`. See `CompletionOverrideSuite`'s `rename'.
                   case Some(rename) =>
+                    foundRenames += (h -> rename)
                     PrettyType(
                       (rename :: prev.map(_.name)).mkString(".")
                     )
@@ -147,6 +158,7 @@ class ShortenedNames(
             processOwners(sym, Nil, sym.ownersIterator.toList)
           renames.get(sym.owner) match
             case Some(rename) =>
+              foundRenames += (sym.owner -> rename)
               val short = ShortName(Names.termName(rename), sym.owner)
               if tryShortenName(short) then
                 PrettyType(s"$rename.${sym.name.show}")

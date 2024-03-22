@@ -16,7 +16,6 @@ import scala.util.control.NonFatal
 
 import scala.meta.inputs.Input
 import scala.meta.inputs.Position
-import scala.meta.internal.decorations.DecorationOptions
 import scala.meta.internal.metals.CompilerOffsetParamsUtils
 import scala.meta.internal.metals.CompilerRangeParamsUtils
 import scala.meta.internal.metals.Compilers.PresentationCompilerKey
@@ -25,6 +24,7 @@ import scala.meta.internal.parsing.Trees
 import scala.meta.internal.pc.EmptySymbolSearch
 import scala.meta.internal.pc.JavaPresentationCompiler
 import scala.meta.internal.pc.LogMessages
+import scala.meta.internal.pc.PcSymbolInformation
 import scala.meta.internal.pc.ScalaPresentationCompiler
 import scala.meta.internal.worksheets.WorksheetPcData
 import scala.meta.internal.worksheets.WorksheetProvider
@@ -35,7 +35,7 @@ import scala.meta.pc.HoverSignature
 import scala.meta.pc.OffsetParams
 import scala.meta.pc.PresentationCompiler
 import scala.meta.pc.SymbolSearch
-import scala.meta.pc.SyntheticDecoration
+import scala.meta.pc.SyntheticDecorationsParams
 
 import ch.epfl.scala.bsp4j.BuildTargetIdentifier
 import ch.epfl.scala.bsp4j.CompileReport
@@ -46,6 +46,9 @@ import org.eclipse.lsp4j.CompletionParams
 import org.eclipse.lsp4j.Diagnostic
 import org.eclipse.lsp4j.DocumentHighlight
 import org.eclipse.lsp4j.InitializeParams
+import org.eclipse.lsp4j.InlayHint
+import org.eclipse.lsp4j.InlayHintKind
+import org.eclipse.lsp4j.InlayHintParams
 import org.eclipse.lsp4j.RenameParams
 import org.eclipse.lsp4j.SelectionRange
 import org.eclipse.lsp4j.SelectionRangeParams
@@ -563,54 +566,71 @@ class Compilers(
 
   }
 
-  def syntheticDecorations(
-      path: AbsolutePath,
+  def inlayHints(
+      params: InlayHintParams,
       token: CancelToken,
-  ): Future[ju.List[DecorationOptions]] = {
-    loadCompiler(path)
-      .map { compiler =>
-        val (input, _, adjust) =
-          sourceAdjustments(
-            path.toNIO.toUri().toString(),
-            compiler.scalaVersion(),
+  ): Future[ju.List[InlayHint]] = {
+    withPCAndAdjustLsp(params) { (pc, pos, adjust) =>
+      def inlayHintsFallback(
+          params: SyntheticDecorationsParams
+      ): Future[ju.List[InlayHint]] = {
+        pc.syntheticDecorations(params)
+          .asScala
+          .map(
+            _.map { d =>
+              val hint = new InlayHint()
+              hint.setPosition(d.range().getStart())
+              hint.setLabel(d.label())
+              val kind =
+                if (d.kind() <= 2) InlayHintKind.Type
+                else InlayHintKind.Parameter
+              hint.setKind(kind)
+              hint.setData(Array(""))
+              hint
+            }
           )
+      }
 
-        def adjustDecorations(
-            decorations: ju.List[SyntheticDecoration]
-        ): ju.List[DecorationOptions] = {
-          val withCorrectStart = decorations.asScala.dropWhile { d =>
-            val adjusted = adjust
-              .adjustPos(d.range().getStart(), adjustToZero = false)
+      def adjustInlayHints(
+          inlayHints: ju.List[InlayHint]
+      ): ju.List[InlayHint] = {
+        inlayHints.asScala
+          .dropWhile { hint =>
+            val adjusted =
+              adjust.adjustPos(hint.getPosition(), adjustToZero = false)
             adjusted.getLine() < 0 || adjusted.getCharacter() < 0
           }
-          withCorrectStart.map { decoration =>
-            DecorationOptions(
-              decoration.label(),
-              adjust.adjustRange(decoration.range()),
-            )
-          }.asJava
-        }
-        val vFile =
-          CompilerVirtualFileParams(path.toNIO.toUri(), input.text, token)
-
-        val pcParams = CompilerSyntheticDecorationsParams(
-          vFile,
-          typeParameters = userConfig().showInferredType.contains("true"),
-          inferredTypes = userConfig().showInferredType.contains("minimal") ||
-            userConfig().showInferredType.contains("true"),
-          implicitParameters = userConfig().showImplicitArguments,
-          implicitConversions = userConfig().showImplicitConversionsAndClasses,
-        )
-        compiler
-          .syntheticDecorations(pcParams)
-          .asScala
-          .map { decorations =>
-            adjustDecorations(decorations)
+          .map { hint =>
+            hint.setPosition(adjust.adjustPos(hint.getPosition()))
+            hint
           }
-
+          .asJava
       }
-      .getOrElse(Future.successful(Nil.asJava))
 
+      val rangeParams =
+        CompilerRangeParamsUtils.fromPos(pos, token)
+      val pcParams = CompilerInlayHintsParams(
+        rangeParams,
+        typeParameters = userConfig().showInferredType.contains("true"),
+        inferredTypes = userConfig().showInferredType.contains("minimal") ||
+          userConfig().showInferredType.contains("true"),
+        implicitParameters = userConfig().showImplicitArguments,
+        implicitConversions = userConfig().showImplicitConversionsAndClasses,
+      )
+
+      pc
+        .inlayHints(pcParams)
+        .asScala
+        .flatMap { hints =>
+          if (hints.isEmpty) {
+            inlayHintsFallback(pcParams.toSyntheticDecorationsParams)
+              .map(adjustInlayHints)
+          } else {
+            Future.successful(adjustInlayHints(hints))
+          }
+        }
+    }
+      .getOrElse(Future.successful(Nil.asJava))
   }
 
   def completions(
@@ -784,6 +804,18 @@ class Compilers(
     definition(params = params, token = token, findTypeDef = true)
   }
 
+  def info(
+      path: AbsolutePath,
+      symbol: String,
+  ): Future[Option[PcSymbolInformation]] = {
+    loadCompiler(path, forceScala = true)
+      .map(
+        _.info(symbol).asScala
+          .map(_.asScala.map(PcSymbolInformation.from))
+      )
+      .getOrElse(Future(None))
+  }
+
   private def definition(
       params: TextDocumentPositionParams,
       token: CancelToken,
@@ -839,8 +871,16 @@ class Compilers(
     }.getOrElse(Future.successful(Nil.asJava))
   }
 
+  /**
+   * Gets presentation compiler for a file.
+   * @param path for which presentation compiler should be loaded,
+   *             resolves build target based on this file
+   * @param forceScala if should use Scala pc for `.java` files that are in a Scala build target,
+   *                   useful when Scala pc can handle Java files and Java pc implementation of a feature is missing
+   */
   def loadCompiler(
-      path: AbsolutePath
+      path: AbsolutePath,
+      forceScala: Boolean = false,
   ): Option[PresentationCompiler] = {
 
     def fromBuildTarget: Option[PresentationCompiler] = {
@@ -851,6 +891,8 @@ class Compilers(
         case None => Some(fallbackCompiler(path))
         case Some(value) =>
           if (path.isScalaFilename) loadCompiler(value)
+          else if (path.isJavaFilename && forceScala)
+            loadCompiler(value).orElse(loadJavaCompiler(value))
           else if (path.isJavaFilename) loadJavaCompiler(value)
           else None
       }
@@ -1044,6 +1086,20 @@ class Compilers(
   }
 
   private def withPCAndAdjustLsp[T](
+      params: InlayHintParams
+  )(fn: (PresentationCompiler, Position, AdjustLspData) => T): Option[T] = {
+    val path = params.getTextDocument.getUri.toAbsolutePath
+    loadCompiler(path).flatMap { compiler =>
+      val (input, pos, adjust) =
+        sourceAdjustments(
+          params,
+          compiler.scalaVersion(),
+        )
+      pos.toMeta(input).map(metaPos => fn(compiler, metaPos, adjust))
+    }
+  }
+
+  private def withPCAndAdjustLsp[T](
       uri: String,
       range: LspRange,
       extractionPos: LspPosition,
@@ -1109,6 +1165,20 @@ class Compilers(
       scalaVersion,
     )
     (input, adjustRequest(params.getPosition()), adjustResponse)
+  }
+
+  private def sourceAdjustments(
+      params: InlayHintParams,
+      scalaVersion: String,
+  ): (Input.VirtualFile, LspRange, AdjustLspData) = {
+    val (input, adjustRequest, adjustResponse) = sourceAdjustments(
+      params.getTextDocument.getUri(),
+      scalaVersion,
+    )
+    val start = params.getRange.getStart()
+    val end = params.getRange.getEnd()
+    val newRange = new LspRange(adjustRequest(start), adjustRequest(end))
+    (input, newRange, adjustResponse)
   }
 
   private def sourceAdjustments(

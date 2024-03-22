@@ -42,11 +42,11 @@ import scala.meta.internal.mtags.MtagsEnrichments
 import scala.meta.internal.parsing.EmptyResult
 import scala.meta.internal.semanticdb.Scala.Descriptor
 import scala.meta.internal.semanticdb.Scala.Symbols
-import scala.meta.internal.trees.Origin
-import scala.meta.internal.trees.Origin.Parsed
 import scala.meta.internal.{semanticdb => s}
 import scala.meta.io.AbsolutePath
 import scala.meta.io.RelativePath
+import scala.meta.trees.Origin
+import scala.meta.trees.Origin.Parsed
 
 import ch.epfl.scala.{bsp4j => b}
 import com.google.gson.Gson
@@ -128,6 +128,15 @@ object MetalsEnrichments
         name.replaceAll("[^a-zA-Z0-9]+", "-")
       } else
         buildTarget.getDisplayName
+    }
+  }
+
+  implicit class XtensionDependencyModule(module: b.DependencyModule) {
+    def asMavenDependencyModule: Option[b.MavenDependencyModule] = {
+      if (module.getDataKind() == b.DependencyModuleDataKind.MAVEN)
+        decodeJson(module.getData, classOf[b.MavenDependencyModule])
+      else
+        None
     }
   }
 
@@ -244,8 +253,12 @@ object MetalsEnrichments
 
     def withTimeout(length: Int, unit: TimeUnit)(implicit
         ec: ExecutionContext
-    ): Future[A] = {
-      Future(Await.result(future, FiniteDuration(length, unit)))
+    ): Future[A] = withTimeout(FiniteDuration(length, unit))
+
+    def withTimeout(
+        duration: FiniteDuration
+    )(implicit ec: ExecutionContext): Future[A] = {
+      Future(Await.result(future, duration))
     }
 
     def onTimeout(length: Int, unit: TimeUnit)(
@@ -338,6 +351,18 @@ object MetalsEnrichments
 
   implicit class XtensionAbsolutePathBuffers(path: AbsolutePath) {
 
+    def isBazelRelatedPath: Boolean = {
+      val filename = path.toNIO.getFileName.toString
+      filename == "WORKSPACE" ||
+      filename == "BUILD" ||
+      filename == "BUILD.bazel" ||
+      filename.endsWith(".bzl") ||
+      filename.endsWith(".bazelproject")
+    }
+    def isInBspDirectory(workspace: AbsolutePath): Boolean =
+      path.toNIO.startsWith(workspace.resolve(Directories.bsp).toNIO)
+    def isInBazelBspDirectory(workspace: AbsolutePath): Boolean =
+      path.toNIO.startsWith(workspace.resolve(Directories.bazelBsp).toNIO)
     def isScalaProject(): Boolean =
       containsProjectFilesSatisfying(_.isScala)
     def isMetalsProject(): Boolean =
@@ -376,10 +401,9 @@ object MetalsEnrichments
       }
     }
 
-    def isDependencySource(workspace: AbsolutePath): Boolean = {
+    def isDependencySource(workspace: AbsolutePath): Boolean =
       (isLocalFileSystem(workspace) &&
         isInReadonlyDirectory(workspace)) || isJarFileSystem
-    }
 
     def isWorkspaceSource(workspace: AbsolutePath): Boolean =
       isLocalFileSystem(workspace) &&
@@ -396,11 +420,18 @@ object MetalsEnrichments
       path.toNIO.startsWith(
         workspace.resolve(Directories.readonly).toNIO
       )
+
+    def isInTmpDirectory(workspace: AbsolutePath): Boolean =
+      path.toNIO.startsWith(
+        workspace.resolve(Directories.tmp).toNIO
+      )
+
     def isSrcZipInReadonlyDirectory(workspace: AbsolutePath): Boolean = {
       path.toNIO.startsWith(
         workspace.resolve(Directories.dependencies.resolve("src.zip")).toNIO
       )
     }
+
     def toRelativeInside(prefix: AbsolutePath): Option[RelativePath] = {
       // windows throws an exception on toRelative when on different drives
       if (path.toNIO.getRoot() != prefix.toNIO.getRoot())
@@ -526,6 +557,23 @@ object MetalsEnrichments
     def isJar: Boolean = {
       val filename = path.toNIO.getFileName.toString
       filename.endsWith(".jar") || filename.endsWith(".srcjar")
+    }
+
+    /**
+     * Bazelbsp provides us with a path to a jar.
+     * SemanticDB files are store in the same directory as the jar file.
+     *
+     * Example: `/path/hello.jar -> /path/_semanticdb/hello`
+     */
+    def resolveIfJar: AbsolutePath = {
+      if (path.isJar) {
+        val filename = path.toNIO.getFileName.toString
+        val filename0 = filename.stripSuffix(".jar").stripSuffix(".srcjar")
+        val targetroot = path.parent.resolve(s"_semanticdb/$filename0")
+        targetroot
+      } else {
+        path
+      }
     }
 
     def isZip: Boolean = {
@@ -723,6 +771,11 @@ object MetalsEnrichments
     def lineAtIndex(index: Int): Int =
       indexToLspPosition(index).getLine
 
+    def bazelEscapedDisplayName: String = {
+      if (value.contains('/'))
+        value.replace('/', ':')
+      else value
+    }
   }
 
   implicit class XtensionTextDocumentSemanticdb(textDocument: s.TextDocument) {
@@ -1074,6 +1127,14 @@ object MetalsEnrichments
   implicit class XtensionClientCapabilities(
       params: l.InitializeParams
   ) {
+    def supportsVersionedWorkspaceEdits: Boolean =
+      (for {
+        capabilities <- Option(params.getCapabilities)
+        workspace <- Option(capabilities.getWorkspace)
+        workspaceEdit <- Option(workspace.getWorkspaceEdit)
+        docChanges <- Option(workspaceEdit.getDocumentChanges)
+      } yield docChanges.booleanValue).getOrElse(false)
+
     def supportsHierarchicalDocumentSymbols: Boolean =
       (for {
         capabilities <- Option(params.getCapabilities)
@@ -1147,17 +1208,17 @@ object MetalsEnrichments
 
     def leadingTokens: Iterator[m.Token] =
       tree.origin match {
-        case Origin.Parsed(input, dialect, pos) =>
-          val tokens = dialect(input).tokenize.get
-          tokens.slice(0, pos.start - 1).reverseIterator
+        case Origin.Parsed(parsed, start, _) =>
+          val tokens = parsed.dialect(parsed.input).tokenize.get
+          tokens.slice(0, start - 1).reverseIterator
         case _ => Iterator.empty
       }
 
     def trailingTokens: Iterator[m.Token] =
       tree.origin match {
-        case Origin.Parsed(input, dialect, pos) =>
-          val tokens = dialect(input).tokenize.get
-          tokens.slice(pos.end, tokens.length).iterator
+        case Origin.Parsed(parsed, _, end) =>
+          val tokens = parsed.dialect(parsed.input).tokenize.get
+          tokens.slice(end, tokens.length).iterator
         case _ => Iterator.empty
       }
 
@@ -1233,12 +1294,20 @@ object MetalsEnrichments
     }
   }
 
+  implicit class XtensionLocation(location: l.Location) {
+    def toTextDocumentPositionParams =
+      new l.TextDocumentPositionParams(
+        new l.TextDocumentIdentifier(location.getUri()),
+        location.getRange().getStart(),
+      )
+  }
+
   /**
    * Strips ANSI colors.
    * As long as the color codes are valid this should correctly strip
    * anything that is ESC (U+001B) plus [
    */
   def filterANSIColorCodes(str: String): String =
-    str.replaceAll("\u001B\\[[;\\d]*m", "")
+    str.replaceAll("\u001b\\[1A\u001b\\[K|\u001B\\[[;\\d]*m", "")
 
 }

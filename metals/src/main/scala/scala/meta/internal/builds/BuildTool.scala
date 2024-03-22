@@ -4,6 +4,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 
+import scala.meta.internal.metals.Directories
 import scala.meta.io.AbsolutePath
 
 trait BuildTool {
@@ -26,6 +27,20 @@ trait BuildTool {
 
   val isBloopInstallProvider = false
 
+  /**
+   * Name of the build server if different than the actual build-tool that is
+   * serving as a build server.
+   *
+   * Ex. mill isn't mill, but rather mill-bsp
+   */
+  def buildServerName = executableName
+
+  def possibleBuildServerNames: List[String] = List(buildServerName)
+
+  def isBspGenerated(workspace: AbsolutePath): Boolean =
+    possibleBuildServerNames
+      .map(name => workspace.resolve(Directories.bsp).resolve(s"$name.json"))
+      .exists(_.isFile)
 }
 
 object BuildTool {

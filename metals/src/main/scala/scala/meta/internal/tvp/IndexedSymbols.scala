@@ -5,21 +5,31 @@ import java.io.UncheckedIOException
 import scala.collection.concurrent.TrieMap
 
 import scala.meta.Dialect
+import scala.meta._
+import scala.meta.inputs.Input
 import scala.meta.internal.io.FileIO
+import scala.meta.internal.metals.Buffers
+import scala.meta.internal.metals.BuildTargets
 import scala.meta.internal.metals.MetalsEnrichments._
 import scala.meta.internal.metals.ReportContext
-import scala.meta.internal.metals.SemanticdbFeatureProvider
 import scala.meta.internal.metals.Time
 import scala.meta.internal.metals.Timer
+import scala.meta.internal.mtags.JavaMtags
 import scala.meta.internal.mtags.Mtags
+import scala.meta.internal.mtags.ScalaMtags
 import scala.meta.internal.mtags.Symbol
 import scala.meta.internal.mtags.SymbolDefinition
+import scala.meta.internal.parsing.Trees
 import scala.meta.internal.semanticdb.SymbolInformation
-import scala.meta.internal.semanticdb.TextDocuments
 import scala.meta.io.AbsolutePath
+import scala.meta.trees.Origin
 
-class IndexedSymbols(isStatisticsEnabled: Boolean)(implicit rc: ReportContext)
-    extends SemanticdbFeatureProvider {
+class IndexedSymbols(
+    isStatisticsEnabled: Boolean,
+    trees: Trees,
+    buffers: Buffers,
+    buildTargets: BuildTargets,
+)(implicit rc: ReportContext) {
 
   private val mtags = new Mtags()
   // Used for workspace, is eager
@@ -32,6 +42,12 @@ class IndexedSymbols(isStatisticsEnabled: Boolean)(implicit rc: ReportContext)
   type ToplevelSymbol = String
   type AllSymbols = Array[TreeViewSymbolInformation]
 
+  private val filteredSymbols: Set[SymbolInformation.Kind] = Set(
+    SymbolInformation.Kind.CONSTRUCTOR,
+    SymbolInformation.Kind.PARAMETER,
+    SymbolInformation.Kind.TYPE_PARAMETER,
+  )
+
   /* Used for dependencies lazily calculates all symbols in a jar.
    * At the start it only contains the definition of a toplevel Symbol, later
    * resolves to information about all symbols contained in the top level.
@@ -41,31 +57,8 @@ class IndexedSymbols(isStatisticsEnabled: Boolean)(implicit rc: ReportContext)
     TrieMap[ToplevelSymbol, Either[TopLevel, AllSymbols]],
   ]
 
-  private val filteredSymbols: Set[SymbolInformation.Kind] = Set(
-    SymbolInformation.Kind.CONSTRUCTOR,
-    SymbolInformation.Kind.PARAMETER,
-    SymbolInformation.Kind.TYPE_PARAMETER,
-  )
-
-  override def onChange(docs: TextDocuments, path: AbsolutePath): Unit = {
-    val all = docs.documents.flatMap { doc =>
-      val existing = doc.occurrences.collect {
-        case occ if occ.role.isDefinition => occ.symbol
-      }.toSet
-      doc.symbols.distinct.collect {
-        case info if existing(info.symbol) && !filteredSymbols(info.kind) =>
-          TreeViewSymbolInformation(
-            info.symbol,
-            info.kind,
-            info.properties,
-          )
-      }
-    }.toList
-    workspaceCache.put(path, all.toArray)
-  }
-
-  override def onDelete(path: AbsolutePath): Unit = {
-    workspaceCache.remove(path)
+  def onChange(in: AbsolutePath): Unit = {
+    workspaceCache.remove(in)
   }
 
   def reset(): Unit = {
@@ -82,8 +75,63 @@ class IndexedSymbols(isStatisticsEnabled: Boolean)(implicit rc: ReportContext)
     result
   }
 
+  private def scalaSymbols(in: AbsolutePath): Seq[SymbolInformation] = {
+    trees
+      .get(in)
+      .map { tree =>
+        ((tree, tree.origin) match {
+          case (
+                src: Source,
+                parsed: Origin.Parsed,
+              ) =>
+            parsed.input match {
+              case input: Input.VirtualFile =>
+                val mtags =
+                  new ScalaMtags(input, parsed.dialect, Some(src))
+                Some(mtags.index().symbols)
+              case _ => None
+            }
+          case _ => None
+        }).getOrElse {
+          // Trees don't return anything else than Source, and it should be impossible to get here
+          scribe.error(
+            s"[$in] Unexpected tree type ${tree.getClass} in IndexedSymbols with origin:\n${tree.origin} "
+          )
+          Seq.empty[SymbolInformation]
+        }
+      }
+      .getOrElse(Seq.empty[SymbolInformation])
+  }
+
+  private def javaSymbols(in: AbsolutePath) = {
+    val mtags = new JavaMtags(
+      Input.VirtualFile(in.toString(), buffers.get(in).getOrElse(in.readText)),
+      includeMembers = true,
+    )
+    mtags
+      .index()
+      .symbols
+  }
+
+  private def workspaceSymbolsFromPath(
+      in: AbsolutePath
+  ): Array[TreeViewSymbolInformation] = {
+    val symbolInfos = if (in.isScala) { scalaSymbols(in) }
+    else if (in.isJava && in.exists) { javaSymbols(in) }
+    else List.empty[SymbolInformation]
+
+    symbolInfos.collect {
+      case info if !filteredSymbols(info.kind) =>
+        TreeViewSymbolInformation(
+          info.symbol,
+          info.kind,
+          info.properties,
+        )
+    }.toArray
+  }
+
   /**
-   * We load all symbols for workspace when semanticdb files are produced.
+   * We load all symbols using the standard mtags indexing mechanisms
    *
    * @param in the input file to get symbols for
    * @param symbol we are looking for
@@ -92,9 +140,11 @@ class IndexedSymbols(isStatisticsEnabled: Boolean)(implicit rc: ReportContext)
   def workspaceSymbols(
       in: AbsolutePath,
       symbol: String,
-  ): Iterator[TreeViewSymbolInformation] = withTimer(s"$in/!$symbol") {
-    val syms = workspaceCache
-      .getOrElse(in, Array.empty)
+  ): Iterator[TreeViewSymbolInformation] = withTimer(s"$in") {
+    val syms = workspaceCache.getOrElseUpdate(
+      in,
+      workspaceSymbolsFromPath(in),
+    )
     if (Symbol(symbol).isRootPackage) syms.iterator
     else
       syms.collect {
@@ -115,12 +165,14 @@ class IndexedSymbols(isStatisticsEnabled: Boolean)(implicit rc: ReportContext)
       symbol: String,
       dialect: Dialect,
   ): Iterator[TreeViewSymbolInformation] = withTimer(s"$in/!$symbol") {
-    lazy val potentialSourceJar =
-      in.parent.resolve(in.filename.replace(".jar", "-sources.jar"))
-    if (!in.isSourcesJar && !potentialSourceJar.exists) {
+    lazy val potentialSourceJar = buildTargets.sourceJarFor(in)
+    if (!in.isSourcesJar && potentialSourceJar.isEmpty) {
       Iterator.empty[TreeViewSymbolInformation]
     } else {
-      val realIn = if (!in.isSourcesJar) potentialSourceJar else in
+      val realIn =
+        if (!in.isSourcesJar && potentialSourceJar.isDefined)
+          potentialSourceJar.get
+        else in
       val jarSymbols = jarCache.getOrElseUpdate(
         realIn, {
           val toplevels = toplevelsAt(in, dialect)

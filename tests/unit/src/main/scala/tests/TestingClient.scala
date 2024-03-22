@@ -17,6 +17,7 @@ import scala.meta.internal.builds.BuildTools
 import scala.meta.internal.decorations.PublishDecorationsParams
 import scala.meta.internal.metals.Buffers
 import scala.meta.internal.metals.ClientCommands
+import scala.meta.internal.metals.Debug
 import scala.meta.internal.metals.FileOutOfScalaCliBspScope
 import scala.meta.internal.metals.Icons
 import scala.meta.internal.metals.Messages._
@@ -45,12 +46,14 @@ import org.eclipse.lsp4j.ExecuteCommandParams
 import org.eclipse.lsp4j.MessageActionItem
 import org.eclipse.lsp4j.MessageParams
 import org.eclipse.lsp4j.MessageType
+import org.eclipse.lsp4j.ProgressParams
 import org.eclipse.lsp4j.PublishDiagnosticsParams
 import org.eclipse.lsp4j.RegistrationParams
 import org.eclipse.lsp4j.ResourceOperation
 import org.eclipse.lsp4j.ShowMessageRequestParams
 import org.eclipse.lsp4j.TextDocumentEdit
 import org.eclipse.lsp4j.TextEdit
+import org.eclipse.lsp4j.WorkDoneProgressCreateParams
 import org.eclipse.lsp4j.WorkspaceEdit
 import org.eclipse.lsp4j.jsonrpc.CompletableFutures
 import tests.MetalsTestEnrichments._
@@ -66,6 +69,7 @@ class TestingClient(workspace: AbsolutePath, val buffers: Buffers)
     extends NoopLanguageClient {
   // Customization of the window/showMessageRequest response
   var importBuildChanges: MessageActionItem = ImportBuildChanges.notNow
+  var generateBspAndConnect: MessageActionItem = GenerateBspAndConnect.notNow
   var importBuild: MessageActionItem = ImportBuild.notNow
   var switchBuildTool: MessageActionItem = NewBuildToolDetected.dontSwitch
   var restartBloop: MessageActionItem = BloopVersionChange.notNow
@@ -98,6 +102,9 @@ class TestingClient(workspace: AbsolutePath, val buffers: Buffers)
   val messageRequests = new ConcurrentLinkedDeque[String]()
   val showMessages = new ConcurrentLinkedQueue[MessageParams]()
   val statusParams = new ConcurrentLinkedQueue[MetalsStatusParams]()
+  val workDoneProgressCreateParams =
+    new ConcurrentLinkedQueue[WorkDoneProgressCreateParams]()
+  val progressParams = new ConcurrentLinkedQueue[ProgressParams]()
   val logMessages = new ConcurrentLinkedQueue[MessageParams]()
   val treeViewChanges = new ConcurrentLinkedQueue[TreeViewDidChangeParams]()
 
@@ -131,6 +138,7 @@ class TestingClient(workspace: AbsolutePath, val buffers: Buffers)
   override def metalsExecuteClientCommand(
       params: ExecuteCommandParams
   ): Unit = {
+    Debug.printEnclosing(params.getCommand())
     clientCommands.addLast(params)
     params.getCommand match {
       case ClientCommands.RefreshModel.id =>
@@ -303,6 +311,16 @@ class TestingClient(workspace: AbsolutePath, val buffers: Buffers)
         .contains(params)
     }
 
+    def isSameGenerateBspAndConnectMessage(): Boolean = {
+      val buildTools = BuildTools.default().allAvailable
+      buildTools.exists(tool =>
+        GenerateBspAndConnect.params(
+          tool.executableName,
+          tool.buildServerName,
+        ) == params
+      )
+    }
+
     def isNewBuildToolDetectedMessage(): Boolean = {
       val buildTools = BuildTools.default().allAvailable
       buildTools.exists(newBuildTool =>
@@ -324,6 +342,8 @@ class TestingClient(workspace: AbsolutePath, val buffers: Buffers)
       showMessageRequestHandler(params).getOrElse {
         if (isSameMessage(ImportBuildChanges.params)) {
           importBuildChanges
+        } else if (isSameGenerateBspAndConnectMessage) {
+          generateBspAndConnect
         } else if (isSameMessage(ImportBuild.params)) {
           importBuild
         } else if (BloopVersionChange.params() == params) {
@@ -391,6 +411,19 @@ class TestingClient(workspace: AbsolutePath, val buffers: Buffers)
   override def metalsStatus(params: MetalsStatusParams): Unit = {
     statusParams.add(params)
 
+  }
+
+  override def createProgress(
+      params: WorkDoneProgressCreateParams
+  ): CompletableFuture[Void] = {
+    CompletableFuture.completedFuture[Void] {
+      workDoneProgressCreateParams.add(params)
+      null
+    }
+  }
+
+  override def notifyProgress(params: ProgressParams): Unit = {
+    progressParams.add(params)
   }
 
   override def rawMetalsInputBox(

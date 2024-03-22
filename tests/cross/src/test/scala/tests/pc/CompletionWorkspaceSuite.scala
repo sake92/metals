@@ -652,20 +652,12 @@ class CompletionWorkspaceSuite extends BaseCompletionSuite {
        |  Implicits@@
        |}
        |""".stripMargin,
-    """|import scala.concurrent.ExecutionContext
+    """|import scala.concurrent.ExecutionContext.Implicits
        |object Main {
-       |  ExecutionContext.Implicits
+       |  Implicits
        |}
        |""".stripMargin,
-    filter = _ == "Implicits - scala.concurrent.ExecutionContext",
-    compat = Map {
-      "3" ->
-        """|import scala.concurrent.ExecutionContext.Implicits
-           |object Main {
-           |  Implicits
-           |}
-           |""".stripMargin
-    }
+    filter = _ == "Implicits - scala.concurrent.ExecutionContext"
   )
 
   // this test was intended to check that import is rendered correctly - without `$` symbol
@@ -844,9 +836,9 @@ class CompletionWorkspaceSuite extends BaseCompletionSuite {
        |
        |package b {
        |
-       |  import a.A
+       |  import a.A.Beta
        |  object B{
-       |    val x: A.Beta
+       |    val x: Beta
        |  }
        |}
        |""".stripMargin,
@@ -905,8 +897,8 @@ class CompletionWorkspaceSuite extends BaseCompletionSuite {
        |  def main: Unit = incre@@
        |""".stripMargin,
     """|increment3: Int
-       |increment: Int
-       |increment2: Int
+       |increment - a: Int
+       |increment2 - a.c: Int
        |""".stripMargin
   )
 
@@ -926,8 +918,8 @@ class CompletionWorkspaceSuite extends BaseCompletionSuite {
        |package c:
        |  def main() = foo@@
        |""".stripMargin,
-    """|fooBar(x: Int): Int
-       |fooBar(x: String): Int
+    """|fooBar - a(x: Int): Int
+       |fooBar - a.b(x: String): Int
        |""".stripMargin
   )
 
@@ -952,7 +944,12 @@ class CompletionWorkspaceSuite extends BaseCompletionSuite {
     compat = Map(
       "2" -> """|fooBar: String
                 |fooBar - case_class_param.A: List[Int]
-                |""".stripMargin
+                |""".stripMargin,
+      ">=3.4.1-RC1-bin-20240208-hash-NIGHTLY" ->
+        """|fooBar: String
+           |fooBar: List[Int]
+           |fooBar(n: Int): Int
+           |""".stripMargin
     )
   )
 
@@ -1010,7 +1007,98 @@ class CompletionWorkspaceSuite extends BaseCompletionSuite {
        |  }
        |}
        |""".stripMargin,
-    filter = _.contains("mmmm(x: Int)")
+    filter = _.contains("mmmm - demo.O")
+  )
+
+  check(
+    "method-label",
+    """|package demo
+       |
+       |object O {
+       | def method(i: Int): Int = i + 1
+       |}
+       |
+       |object Main {
+       |  val x = meth@@
+       |}
+       |""".stripMargin,
+    """|method - demo.O(i: Int): Int
+       |""".stripMargin
+  )
+
+  check(
+    "implicit-class-val",
+    """|package demo
+       |
+       |object O {
+       |  implicit class CursorOps(val bar: Int)
+       |}
+       |
+       |object Main {
+       |  val x = bar@@
+       |}
+       |""".stripMargin,
+    ""
+  )
+
+  check(
+    "implicit-class-def",
+    """|package demo
+       |
+       |object O {
+       |  implicit class CursorOps(val bar: Int) {
+       |    def fooBar = 42
+       |  }
+       |}
+       |
+       |object Main {
+       |  val x = fooB@@
+       |}
+       |""".stripMargin,
+    ""
+  )
+
+  check(
+    "extension-method".tag(IgnoreScala2),
+    """|package demo
+       |
+       |object O {
+       |  extension (bar: Int) {
+       |    def fooBar = 42
+       |  }
+       |}
+       |
+       |object Main {
+       |  val x = fooB@@
+       |}
+       |""".stripMargin,
+    ""
+  )
+
+  check(
+    "implicit-class",
+    """|package example
+       |object Test {
+       |  implicit class TestOps(a: Int) {
+       |    def testOps(b: Int) = ???
+       |  }
+       |  implicit class TestOps2(a: String) {
+       |    def testOps2(b: Int) = ???
+       |  }
+       |  implicit class TestOps4[A](a: List[A]) {
+       |    def testOps4(b: Int) = ???
+       |  }
+       |  class TestOps3(a: String) {
+       |    def testOps3(b: Int) = ???
+       |  }
+       |}
+       |
+       |object ActualTest {
+       |  1.tes@@
+       |}
+       |""".stripMargin,
+    "testOps(b: Int): Nothing (implicit)",
+    filter = _.contains("testOps")
   )
 
 }

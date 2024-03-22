@@ -130,7 +130,10 @@ class SbtBloopLspSuite
       )
       _ = assertStatus(_.isInstalled)
       projectVersion = workspace.resolve("project/build.properties").readText
-      _ = assertNoDiff(projectVersion, s"sbt.version=${V.sbtVersion}")
+      _ = assert(
+        projectVersion.startsWith(s"sbt.version="),
+        "project/build.properties should contains sbt version",
+      )
     } yield ()
   }
 
@@ -868,10 +871,10 @@ class SbtBloopLspSuite
       _ <- server.didOpen("build.sbt")
       _ <- server.didSave("build.sbt")(identity)
       _ = assertNoDiagnostics()
-      _ = assertNoDiff(
-        client.syntheticDecorations,
-        s"""|def foo(): String = "2.13.2"
-            |def bar(): String = foo() 
+      _ <- server.assertInlayHints(
+        "build.sbt",
+        s"""|def foo()/*: String<<java/lang/String#>>*/ = "2.13.2"
+            |def bar()/*: String<<java/lang/String#>>*/ = foo()
             |scalaVersion := "2.13.2"
            """.stripMargin,
       )

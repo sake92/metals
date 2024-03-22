@@ -44,7 +44,6 @@ case class UserConfiguration(
     showInferredType: Option[String] = None,
     showImplicitArguments: Boolean = false,
     showImplicitConversionsAndClasses: Boolean = false,
-    remoteLanguageServer: Option[String] = None,
     enableStripMarginOnTypeFormatting: Boolean = true,
     enableIndentOnPaste: Boolean = false,
     enableSemanticHighlighting: Boolean = true,
@@ -55,8 +54,13 @@ case class UserConfiguration(
     scalafixRulesDependencies: List[String] = Nil,
     customProjectRoot: Option[String] = None,
     verboseCompilation: Boolean = false,
+    automaticImportBuild: AutoImportBuildKind = AutoImportBuildKind.Off,
     scalaCliLauncher: Option[String] = None,
+    defaultBspToBuildTool: Boolean = false,
 ) {
+
+  def shouldAutoImportNewProject: Boolean =
+    automaticImportBuild != AutoImportBuildKind.Off
 
   def currentBloopVersion: String =
     bloopVersion.getOrElse(BuildInfo.bloopVersion)
@@ -275,17 +279,6 @@ object UserConfiguration {
            |""".stripMargin,
       ),
       UserConfigurationOption(
-        "remote-language-server",
-        """empty string `""`.""",
-        """"https://language-server.company.com/message"""",
-        "Remote language server",
-        """A URL pointing to an endpoint that implements a remote language server.
-          |
-          |See https://scalameta.org/metals/docs/integrations/remote-language-server for
-          |documentation on remote language servers.
-          |""".stripMargin,
-      ),
-      UserConfigurationOption(
         "fallback-scala-version",
         BuildInfo.scala3,
         BuildInfo.scala3,
@@ -350,6 +343,24 @@ object UserConfiguration {
         """|If a build server supports it (for example Bloop or Scala CLI), setting it to true
            |will make the logs contain all the possible debugging information including
            |about incremental compilation in Zinc.""".stripMargin,
+      ),
+      UserConfigurationOption(
+        "auto-import-build",
+        "off",
+        "all",
+        "Import build when changes detected without prompting",
+        """|Automatically import builds rather than prompting the user to choose. "initial" will 
+           |only automatically import a build when a project is first opened, "all" will automate 
+           |build imports after subsequent changes as well.""".stripMargin,
+      ),
+      UserConfigurationOption(
+        "default-bsp-to-build-tool",
+        "false",
+        "true",
+        "Default to using build tool as your build server.",
+        """|If your build tool can also serve as a build server,
+           |default to using it instead of Bloop.
+           |""".stripMargin,
       ),
     )
 
@@ -527,8 +538,6 @@ object UserConfiguration {
       getBooleanKey("show-implicit-arguments").getOrElse(false)
     val showImplicitConversionsAndClasses =
       getBooleanKey("show-implicit-conversions-and-classes").getOrElse(false)
-    val remoteLanguageServer =
-      getStringKey("remote-language-server")
     val enableStripMarginOnTypeFormatting =
       getBooleanKey("enable-strip-margin-on-type-formatting").getOrElse(true)
     val enableIndentOnPaste =
@@ -567,6 +576,18 @@ object UserConfiguration {
     val verboseCompilation =
       getBooleanKey("verbose-compilation").getOrElse(false)
 
+    val autoImportBuilds =
+      getStringKey("auto-import-builds").map(_.trim().toLowerCase()) match {
+        case Some("initial") => AutoImportBuildKind.Initial
+        case Some("all") => AutoImportBuildKind.All
+        case _ => AutoImportBuildKind.Off
+      }
+
+    val scalaCliLauncher = getStringKey("scala-cli-launcher")
+
+    val defaultBspToBuildTool =
+      getBooleanKey("default-bsp-to-build-tool").getOrElse(false)
+
     if (errors.isEmpty) {
       Right(
         UserConfiguration(
@@ -588,7 +609,6 @@ object UserConfiguration {
           showInferredType,
           showImplicitArguments,
           showImplicitConversionsAndClasses,
-          remoteLanguageServer,
           enableStripMarginOnTypeFormatting,
           enableIndentOnPaste,
           enableSemanticHighlighting,
@@ -599,6 +619,9 @@ object UserConfiguration {
           scalafixRulesDependencies,
           customProjectRoot,
           verboseCompilation,
+          autoImportBuilds,
+          scalaCliLauncher,
+          defaultBspToBuildTool,
         )
       )
     } else {
@@ -617,4 +640,11 @@ sealed trait TestUserInterfaceKind
 object TestUserInterfaceKind {
   object CodeLenses extends TestUserInterfaceKind
   object TestExplorer extends TestUserInterfaceKind
+}
+
+sealed trait AutoImportBuildKind
+object AutoImportBuildKind {
+  object Off extends AutoImportBuildKind
+  object Initial extends AutoImportBuildKind
+  object All extends AutoImportBuildKind
 }

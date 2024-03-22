@@ -390,4 +390,209 @@ class HoverScala3TypeSuite extends BaseHoverSuite {
        |""".stripMargin,
     "extension [K](vmap: Logarithm) def multiply(k: Logarithm): Logarithm".hover
   )
+
+  check(
+    "i5976",
+    """|sealed trait ExtensionProvider {
+       |  extension [A] (self: A) {
+       |    def typeArg[B <: A]: B
+       |    def noTypeArg: A
+       |  }
+       |}
+       |
+       |object Repro {
+       |  def usage[A](f: ExtensionProvider ?=> A => Any): Any = ???
+       |
+       |  usage[Option[Int]](_.typeArg[Some[Int]].value.noTyp@@eArg.typeArg[Int])
+       |}
+       |""".stripMargin,
+    """|**Expression type**:
+       |```scala
+       |Int
+       |```
+       |**Symbol signature**:
+       |```scala
+       |extension [A](self: A) def noTypeArg: A
+       |```
+       |""".stripMargin
+  )
+
+  check(
+    "i5976-1",
+    """|sealed trait ExtensionProvider {
+       |  extension [A] (self: A) {
+       |    def typeArg[B <: A]: B
+       |    def noTypeArg: A
+       |  }
+       |}
+       |
+       |object Repro {
+       |  def usage[A](f: ExtensionProvider ?=> A => Any): Any = ???
+       |
+       |  usage[Option[Int]](_.type@@Arg[Some[Int]].value.noTypeArg.typeArg[Int])
+       |}
+       |""".stripMargin,
+    """|**Expression type**:
+       |```scala
+       |Some[Int]
+       |```
+       |**Symbol signature**:
+       |```scala
+       |extension [A](self: A) def typeArg[B <: A]: B
+       |```
+       |""".stripMargin
+  )
+
+  check(
+    "i5977",
+    """|sealed trait ExtensionProvider {
+       |  extension [A] (self: A) {
+       |    def typeArg[B <: A]: B
+       |    def inferredTypeArg[C](value: C): C
+       |  }
+       |}
+       |
+       |object Repro {
+       |  def usage[A](f: ExtensionProvider ?=> A => Any): Any = ???
+       |  
+       |  usage[Option[Int]](_.infer@@redTypeArg("str"))
+       |}
+       |""".stripMargin,
+    """|**Expression type**:
+       |```scala
+       |String
+       |```
+       |**Symbol signature**:
+       |```scala
+       |extension [A](self: A) def inferredTypeArg[C](value: C): C
+       |```
+       |""".stripMargin
+  )
+
+  check(
+    "i5977-1",
+    """|sealed trait ExtensionProvider {
+       |  extension [A] (self: A) {
+       |    def typeArg[B <: A]: B
+       |    def inferredTypeArg[C](value: C): C
+       |  }
+       |}
+       |
+       |object Repro {
+       |  def usage[A](f: ExtensionProvider ?=> A => Any): Any = ???
+       |  
+       |  usage[Option[Int]](_.infer@@redTypeArg[String]("str"))
+       |}
+       |""".stripMargin,
+    """|**Expression type**:
+       |```scala
+       |String
+       |```
+       |**Symbol signature**:
+       |```scala
+       |extension [A](self: A) def inferredTypeArg[C](value: C): C
+       |```
+       |""".stripMargin
+  )
+
+  check(
+    "i5977-2",
+    """|sealed trait ExtensionProvider {
+       |  extension [A] (self: A) {
+       |    def typeArg[B <: A]: B
+       |    def inferredTypeArg[C](value: C): C
+       |  }
+       |}
+       |
+       |object Repro {
+       |  def usage[A](f: ExtensionProvider ?=> A => Any): Any = ???
+       |  
+       |  usage[Option[Int]](_.typeArg[Some[Int]].value.infer@@redTypeArg("str"))
+       |}
+       |""".stripMargin,
+    """|**Expression type**:
+       |```scala
+       |String
+       |```
+       |**Symbol signature**:
+       |```scala
+       |extension [A](self: A) def inferredTypeArg[C](value: C): C
+       |```
+       |""".stripMargin
+  )
+
+  check(
+    "i5977-3",
+    """|sealed trait ExtensionProvider {
+       |  extension [A] (self: A) {
+       |    def typeArg[B <: A]: B
+       |    def inferredTypeArg[C](value: C): C
+       |  }
+       |}
+       |
+       |object Repro {
+       |  def usage[A](f: ExtensionProvider ?=> A => Any): Any = ???
+       |  
+       |  usage[Option[Int]](_.typeArg[Some[Int]].value.infer@@redTypeArg[String]("str"))
+       |}
+       |""".stripMargin,
+    """|**Expression type**:
+       |```scala
+       |String
+       |```
+       |**Symbol signature**:
+       |```scala
+       |extension [A](self: A) def inferredTypeArg[C](value: C): C
+       |```
+       |""".stripMargin
+  )
+
+  check(
+    "i6041",
+    """
+      |object B {
+      |  extension (x: Int)(using Int)
+      |    def foo: Int = ???
+      |    
+      |  given Int = 42
+      |  val bar = 42.fo@@o
+      |}
+      |""".stripMargin,
+    """|```scala
+       |extension (x: Int) def foo(using Int): Int
+       |```
+       |""".stripMargin
+  )
+
+  check(
+    "i6401-1",
+    """
+      |sealed trait ExtensionProvider {
+      |  extension [A] (self: A)(using Int) {
+      |    def typeArg[B <: A]: B
+      |    def inferredTypeArg[C](value: C): C
+      |  }
+      |}
+      |
+      |object Repro {
+      |  given Int = 42
+      |  def usage[A](f: ExtensionProvider ?=> A => Any): Any = ???
+      |
+      |  usage[Int](_.inferredTypeArg("str"))
+      |  usage[Int](_.inferredTypeArg[String]("str"))
+      |  usage[Option[Int]](_.typeArg[Some[Int]].value.inferredTypeArg("str"))
+      |  usage[Option[Int]](_.typeArg[Some[Int]].value.inferre@@dTypeArg[String]("str"))
+      |}
+      |""".stripMargin,
+    """|**Expression type**:
+       |```scala
+       |String
+       |```
+       |**Symbol signature**:
+       |```scala
+       |extension [A](self: A) def inferredTypeArg(using Int)[C](value: C): C
+       |```
+       |""".stripMargin
+  )
+
 }

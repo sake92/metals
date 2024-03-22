@@ -1,5 +1,6 @@
 package scala.meta.internal.builds
 
+import scala.annotation.nowarn
 import scala.concurrent.Future
 
 import scala.meta.internal.bsp.BspConfigGenerationStatus._
@@ -16,6 +17,7 @@ trait BuildServerProvider extends BuildTool {
    * Method used to generate a bsp config file for the build
    * tool if one doesn't exist yet.
    */
+  @nowarn("msg=parameter statusBar in method generateBspConfig is never used")
   def generateBspConfig(
       workspace: AbsolutePath,
       systemProcess: List[String] => Future[BspConfigGenerationStatus],
@@ -34,13 +36,4 @@ trait BuildServerProvider extends BuildTool {
    */
   protected def createBspFileArgs(workspace: AbsolutePath): Option[List[String]]
 
-  /**
-   * Name of the build server if different than the actual build-tool that is
-   * serving as a build server.
-   *
-   * Ex. mill isn't mill, but rather mill-bsp
-   */
-  def buildServerName: Option[String] = None
-
-  def getBuildServerName: String = buildServerName.getOrElse(executableName)
 }

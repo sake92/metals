@@ -7,7 +7,6 @@ import scala.meta as m
 import scala.meta.internal.metals.CompilerOffsetParams
 import scala.meta.internal.mtags.MtagsEnrichments.*
 import scala.meta.internal.pc.MetalsInteractive.ExtensionMethodCall
-import scala.meta.internal.pc.MetalsInteractive.ExtensionMethodCallSymbol
 import scala.meta.pc.OffsetParams
 import scala.meta.pc.VirtualFileParams
 
@@ -45,7 +44,7 @@ abstract class PcCollector[T](
   driver.run(uri, source)
   given ctx: Context = driver.currentCtx
 
-  val unit = driver.currentCtx.run.units.head
+  val unit = driver.latestRun
   val compilatonUnitContext = ctx.fresh.setCompilationUnit(unit)
   val offset = params match
     case op: OffsetParams => op.offset()
@@ -252,10 +251,8 @@ abstract class PcCollector[T](
        *
        * val a = MyIntOut(1).<<un@@even>>
        */
-      case ExtensionMethodCall(sym, app) :: _
-          if app.span.withStart(app.span.point).contains(pos.span) =>
-        val span = app.span.withStart(app.span.point)
-        Some(symbolAlternatives(sym), pos.withSpan(span))
+      case ExtensionMethodCall(id) :: _ if id.span.contains(pos.span) =>
+        Some(symbolAlternatives(id.symbol), id.sourcePos)
       case _ => None
 
     sought match
@@ -474,18 +471,11 @@ abstract class PcCollector[T](
          *
          * val a = MyIntOut(1).<<un@@even>>
          */
-        case ExtensionMethodCallSymbol(tree) =>
-          parent match
-            case Some(a: Apply) =>
-              val span = a.span.withStart(a.span.point)
-              val amendedTree = tree.withSpan(span)
-              if filter(amendedTree) then
-                occurences + collect(
-                  amendedTree,
-                  pos.withSpan(span),
-                )
-              else occurences
-            case _ => occurences
+        case ExtensionMethodCall(id) if soughtFilter(_ == id.symbol) =>
+          occurences + collect(
+            id,
+            id.sourcePos,
+          )
         /* all definitions:
          * def <<foo>> = ???
          * class <<Foo>> = ???
@@ -619,8 +609,6 @@ abstract class PcCollector[T](
     all
   end traverseSought
 
-  // @note (tgodzik) Not sure currently how to get rid of the warning, but looks to correctly
-  // @nowarn
   private def collectTrees(trees: Iterable[Positioned]): Iterable[Tree] =
     trees.collect { case t: Tree =>
       t

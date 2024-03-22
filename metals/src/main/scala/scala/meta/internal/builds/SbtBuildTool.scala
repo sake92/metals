@@ -67,7 +67,7 @@ case class SbtBuildTool(
   ): Option[List[String]] =
     Option.when(workspaceSupportsBsp(projectRoot)) {
       val bspConfigArgs = List[String]("bspConfig")
-      val bspDir = workspace.resolve(".bsp").toNIO
+      val bspDir = workspace.resolve(Directories.bsp).toNIO
       composeArgs(bspConfigArgs, projectRoot, bspDir)
     }
 
@@ -86,12 +86,34 @@ case class SbtBuildTool(
     )
   }
 
+  private def findSbtInPath(): Option[String] = {
+    // on Windows sbt is not an executable
+    // look: https://github.com/scalameta/metals/issues/6104
+    if (scala.util.Properties.isWin) None
+    else {
+      val envPaths =
+        Option(System.getenv("PATH")) match {
+          case Some(paths) => paths.split(":").toList
+          case None => Nil
+        }
+
+      val allPaths = projectRoot :: envPaths.map(AbsolutePath(_))
+      allPaths.collectFirst { path =>
+        path.resolve("sbt") match {
+          case sbtPath if sbtPath.exists => sbtPath.toString()
+        }
+      }
+    }
+  }
+
   private def composeArgs(
       sbtArgs: List[String],
       workspace: AbsolutePath,
       sbtLauncherOutDir: Path,
   ): List[String] = {
-    userConfig().sbtScript match {
+    val sbtScript = userConfig().sbtScript.orElse(findSbtInPath())
+
+    sbtScript match {
       case Some(script) =>
         script :: sbtArgs
       case None =>
@@ -427,7 +449,7 @@ object SbtBuildTool {
       workspace: AbsolutePath,
       userJavaHome: Option[String],
   ): Boolean = {
-    val bspConfigFile = workspace.resolve(".bsp").resolve("sbt.json")
+    val bspConfigFile = workspace.resolve(Directories.bsp).resolve("sbt.json")
     if (bspConfigFile.isFile) {
       val matchesSbtJavaHome =
         for {

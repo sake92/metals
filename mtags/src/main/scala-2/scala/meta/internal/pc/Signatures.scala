@@ -102,9 +102,28 @@ trait Signatures { compiler: MetalsGlobal =>
       val history: mutable.Map[Name, ShortName] = mutable.Map.empty,
       val lookupSymbol: Name => List[NameLookup] = _ => Nil,
       val config: collection.Map[Symbol, Name] = Map.empty,
-      val renames: collection.Map[Symbol, Name] = Map.empty,
+      renames: collection.Map[Symbol, Name] = Map.empty,
       val owners: collection.Set[Symbol] = Set.empty
   ) {
+
+    private val lookedUpRenames = mutable.Set[Symbol]()
+
+    def rename(sym: Symbol): Option[Name] = {
+      lookedUpRenames.add(sym)
+      renames.get(sym)
+    }
+
+    def getUsedRenamesInfo(): List[String] =
+      getUsedRenames.toList.sortBy(_._2).map { case (key, v) =>
+        s"type $v = ${key.nameString}"
+      }
+
+    def getUsedRenames: Map[Symbol, String] = lookedUpRenames.flatMap { key =>
+      renames.get(key).collect {
+        case v if key.nameString != v.toString => key -> v.toString()
+      }
+    }.toMap
+
     def this(context: Context) =
       this(lookupSymbol = { name =>
         context.lookupSymbol(name, _ => true) :: Nil
@@ -172,7 +191,7 @@ trait Signatures { compiler: MetalsGlobal =>
                 sym.isStaticMember || // Java static
                 sym.owner.ownerChain.forall { s =>
                   // ensure the symbol can be referenced in a static manner, without any instance
-                  s.isPackageClass || s.isPackageObjectClass || s.isModule
+                  s.isPackageClass || s.isPackageObjectClass || s.isModule || s.isModuleClass
                 }
               ) {
                 history(name) = short

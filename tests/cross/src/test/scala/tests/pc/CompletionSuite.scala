@@ -32,6 +32,13 @@ class CompletionSuite extends BaseCompletionSuite {
            |List - java.util
            |List - scala.collection.immutable
            |List[A](elems: A*): CC[A]
+           |""".stripMargin,
+      ">=3.4.1-RC1-bin-20240208-hash-NIGHTLY" ->
+        """|List scala.collection.immutable
+           |List[A](elems: A*): List[A]
+           |List - java.awt
+           |List - java.util
+           |ListMap[K, V](elems: (K, V)*): ListMap[K, V]
            |""".stripMargin
     ),
     topLines = Some(5)
@@ -314,6 +321,50 @@ class CompletionSuite extends BaseCompletionSuite {
            |wait(): Unit
            |wait(x$0: Long): Unit
            |wait(x$0: Long, x$1: Int): Unit
+           |""".stripMargin,
+      ">=3.4.1-RC1-bin-20240201-hash-NIGHTLY" ->
+        """|empty[A]: List[A]
+           |from[B](coll: IterableOnce[B]): List[B]
+           |newBuilder[A]: Builder[A, List[A]]
+           |apply[A](elems: A*): List[A]
+           |concat[A](xss: Iterable[A]*): List[A]
+           |fill[A](n1: Int, n2: Int)(elem: => A): List[List[A] @uncheckedVariance]
+           |fill[A](n1: Int, n2: Int, n3: Int)(elem: => A): List[List[List[A]] @uncheckedVariance]
+           |fill[A](n1: Int, n2: Int, n3: Int, n4: Int)(elem: => A): List[List[List[List[A]]] @uncheckedVariance]
+           |fill[A](n1: Int, n2: Int, n3: Int, n4: Int, n5: Int)(elem: => A): List[List[List[List[List[A]]]] @uncheckedVariance]
+           |fill[A](n: Int)(elem: => A): List[A]
+           |iterate[A](start: A, len: Int)(f: A => A): List[A]
+           |range[A: Integral](start: A, end: A): List[A]
+           |range[A: Integral](start: A, end: A, step: A): List[A]
+           |tabulate[A](n1: Int, n2: Int)(f: (Int, Int) => A): List[List[A] @uncheckedVariance]
+           |tabulate[A](n1: Int, n2: Int, n3: Int)(f: (Int, Int, Int) => A): List[List[List[A]] @uncheckedVariance]
+           |tabulate[A](n1: Int, n2: Int, n3: Int, n4: Int)(f: (Int, Int, Int, Int) => A): List[List[List[List[A]]] @uncheckedVariance]
+           |tabulate[A](n1: Int, n2: Int, n3: Int, n4: Int, n5: Int)(f: (Int, Int, Int, Int, Int) => A): List[List[List[List[List[A]]]] @uncheckedVariance]
+           |tabulate[A](n: Int)(f: Int => A): List[A]
+           |unapplySeq[A](x: List[A] @uncheckedVariance): UnapplySeqWrapper[A]
+           |unfold[A, S](init: S)(f: S => Option[(A, S)]): List[A]
+           |->[B](y: B): (List.type, B)
+           |ensuring(cond: Boolean): List.type
+           |ensuring(cond: List.type => Boolean): List.type
+           |ensuring(cond: Boolean, msg: => Any): List.type
+           |ensuring(cond: List.type => Boolean, msg: => Any): List.type
+           |fromSpecific(from: Any)(it: IterableOnce[Nothing]): List[Nothing]
+           |fromSpecific(it: IterableOnce[Nothing]): List[Nothing]
+           |nn: List.type & List.type
+           |toFactory(from: Any): Factory[Nothing, List[Nothing]]
+           |formatted(fmtstr: String): String
+           |→[B](y: B): (List.type, B)
+           |iterableFactory[A]: Factory[A, List[A]]
+           |asInstanceOf[X0]: X0
+           |equals(x$0: Any): Boolean
+           |getClass[X0 >: List.type](): Class[? <: X0]
+           |hashCode(): Int
+           |isInstanceOf[X0]: Boolean
+           |synchronized[X0](x$0: X0): X0
+           |toString(): String
+           |wait(): Unit
+           |wait(x$0: Long): Unit
+           |wait(x$0: Long, x$1: Int): Unit
            |""".stripMargin
       // wait(x$0: Long) won't be replaced with timeoutMills here
       // but it will be replaced in `completionItem/resolve`
@@ -329,11 +380,8 @@ class CompletionSuite extends BaseCompletionSuite {
       |  }
       |  Xtension@@
       |}""".stripMargin,
-    """|XtensionMethod(a: Int): A.XtensionMethod
-       |""".stripMargin,
-    compat = Map(
-      "3" -> "XtensionMethod(a: Int): XtensionMethod"
-    )
+    """|XtensionMethod(a: Int): XtensionMethod
+       |""".stripMargin
   )
 
   check(
@@ -376,6 +424,17 @@ class CompletionSuite extends BaseCompletionSuite {
            |PooledConnectionBuilder - javax.sql
            |CertPathBuilderException - java.security.cert
            |PKIXCertPathBuilderResult - java.security.cert
+           |""".stripMargin,
+      ">=3.4.1-RC1-bin-20240201-hash-NIGHTLY" ->
+        """|ProcessBuilder - scala.sys.process
+           |CertPathBuilder - java.security.cert
+           |CertPathBuilderSpi - java.security.cert
+           |ProcessBuilderImpl - scala.sys.process
+           |CertPathBuilderResult - java.security.cert
+           |PKIXBuilderParameters - java.security.cert
+           |PooledConnectionBuilder - javax.sql
+           |CertPathBuilderException - java.security.cert
+           |PKIXCertPathBuilderResult - java.security.cert
            |""".stripMargin
     )
   )
@@ -402,6 +461,10 @@ class CompletionSuite extends BaseCompletionSuite {
       "3" ->
         """|TrieMap scala.collection.concurrent
            |TrieMap[K, V](elems: (K, V)*): CC[K, V]
+           |""".stripMargin,
+      ">=3.4.1-RC1-bin-20240208-hash-NIGHTLY" ->
+        """|TrieMap scala.collection.concurrent
+           |TrieMap[K, V](elems: (K, V)*): TrieMap[K, V]
            |""".stripMargin
     )
   )
@@ -516,7 +579,22 @@ class CompletionSuite extends BaseCompletionSuite {
        |XPathNodes - javax.xml.xpath
        |PathMatcher - java.nio.file
        |XPathResult - org.w3c.dom.xpath
-       |""".stripMargin
+       |""".stripMargin,
+    compat = Map(
+      "2.11.12" ->
+        """|Path - java.nio.file
+           |Paths - java.nio.file
+           |XPath - javax.xml.xpath
+           |Path2D - java.awt.geom
+           |CertPath - java.security.cert
+           |TreePath - javax.swing.tree
+           |XPathType - javax.xml.crypto.dsig.spec
+           |LayoutPath - java.awt.font
+           |XPathNodes - javax.xml.xpath
+           |PathMatcher - java.nio.file
+           |GeneralPath - java.awt.geom
+           |""".stripMargin
+    )
   )
 
   check(
@@ -863,6 +941,12 @@ class CompletionSuite extends BaseCompletionSuite {
            |until(end: Int, step: Int): Range
            |until(end: T): Exclusive[T]
            |until(end: T, step: T): Exclusive[T]
+           |""".stripMargin,
+      ">=3.4.1-RC1-bin-20240201-hash-NIGHTLY" ->
+        """|until(end: Int): Range
+           |until(end: Int, step: Int): Range
+           |until(end: Long): Exclusive[Long]
+           |until(end: Long, step: Long): Exclusive[Long]
            |""".stripMargin
     )
   )
@@ -1020,9 +1104,6 @@ class CompletionSuite extends BaseCompletionSuite {
         """|Some(value) scala
            |Some scala
            |Some[A](value: A): Some[A]
-           |SomeToExpr(x: Some[T])(using Quotes): Expr[Some[T]]
-           |SomeToExpr[T: Type: ToExpr]: SomeToExpr[T]
-           |SomeFromExpr[T](using Type[T], FromExpr[T]): SomeFromExpr[T]
            |""".stripMargin
     )
   )
@@ -1037,20 +1118,9 @@ class CompletionSuite extends BaseCompletionSuite {
     """|Some scala
        |""".stripMargin,
     compat = Map(
-      ">=3.1.0" ->
-        """|Some scala
-           |Some[A](value: A): Some[A]
-           |SomeToExpr(x: Some[T])(using Quotes): Expr[Some[T]]
-           |SomeToExpr[T: Type: ToExpr]: SomeToExpr[T]
-           |SomeFromExpr[T](using Type[T], FromExpr[T]): SomeFromExpr[T]
-           |""".stripMargin,
       "3" ->
         """|Some scala
            |Some[A](value: A): Some[A]
-           |SomeToExpr - scala.quoted.ToExpr
-           |SomeToExpr[T: Type: ToExpr]: SomeToExpr[T]
-           |SomeFromExpr - scala.quoted.FromExpr
-           |SomeFromExpr[T](using Type[T], FromExpr[T]): SomeFromExpr[T]
            |""".stripMargin
     )
   )
@@ -1334,6 +1404,13 @@ class CompletionSuite extends BaseCompletionSuite {
            |experimental scala.languageFeature
            |higherKinds scala.languageFeature
            |implicitConversions scala.languageFeature
+           |""".stripMargin,
+      ">=3.3.2-RC3" ->
+        """|dynamics languageFeature
+           |existentials languageFeature
+           |experimental languageFeature
+           |implicitConversions languageFeature
+           |postfixOps languageFeature
            |""".stripMargin,
       ">=3.4.0-RC1-bin-20230921-3d539e6-NIGHTLY" ->
         """|dynamics scala.languageFeature
@@ -1713,7 +1790,7 @@ class CompletionSuite extends BaseCompletionSuite {
         | val t: TT@@
         |}
         |""".stripMargin,
-    "TTT[A] = O.TTT",
+    "TTT[A] = TTT",
     compat = Map(
       "3" -> "TTT[A <: Int] = List[A]"
     )
@@ -1791,6 +1868,16 @@ class CompletionSuite extends BaseCompletionSuite {
        |  extension (x: Fo@@)
        |""".stripMargin,
     """|Foo extension-definition-scope
+       |Font - java.awt
+       |Form - java.text.Normalizer
+       |Format - java.text
+       |FontPeer - java.awt.peer
+       |FormView - javax.swing.text.html
+       |Formatter - java.util
+       |Formatter - java.util.logging
+       |FocusEvent - java.awt.event
+       |FontMetrics - java.awt
+       |Found - scala.collection.Searching
        |""".stripMargin
   )
 
@@ -1815,6 +1902,16 @@ class CompletionSuite extends BaseCompletionSuite {
        |  extension [A <: Fo@@]
        |""".stripMargin,
     """|Foo extension-definition-type-parameter
+       |Font - java.awt
+       |Form - java.text.Normalizer
+       |Format - java.text
+       |FontPeer - java.awt.peer
+       |FormView - javax.swing.text.html
+       |Formatter - java.util
+       |Formatter - java.util.logging
+       |FocusEvent - java.awt.event
+       |FontMetrics - java.awt
+       |Found - scala.collection.Searching
        |""".stripMargin
   )
 
@@ -1839,6 +1936,16 @@ class CompletionSuite extends BaseCompletionSuite {
        |  extension (using Fo@@)
        |""".stripMargin,
     """|Foo extension-definition-using-param-clause
+       |Font - java.awt
+       |Form - java.text.Normalizer
+       |Format - java.text
+       |FontPeer - java.awt.peer
+       |FormView - javax.swing.text.html
+       |Formatter - java.util
+       |Formatter - java.util.logging
+       |FocusEvent - java.awt.event
+       |FontMetrics - java.awt
+       |Found - scala.collection.Searching
        |""".stripMargin
   )
 
@@ -1851,6 +1958,16 @@ class CompletionSuite extends BaseCompletionSuite {
        |  extension (x: Int)(using Fo@@)
        |""".stripMargin,
     """|Foo extension-definition-mix-1
+       |Font - java.awt
+       |Form - java.text.Normalizer
+       |Format - java.text
+       |FontPeer - java.awt.peer
+       |FormView - javax.swing.text.html
+       |Formatter - java.util
+       |Formatter - java.util.logging
+       |FocusEvent - java.awt.event
+       |FontMetrics - java.awt
+       |Found - scala.collection.Searching
        |""".stripMargin
   )
 
@@ -1863,6 +1980,16 @@ class CompletionSuite extends BaseCompletionSuite {
        |  extension (using Fo@@)(x: Int)(using Foo)
        |""".stripMargin,
     """|Foo extension-definition-mix-2
+       |Font - java.awt
+       |Form - java.text.Normalizer
+       |Format - java.text
+       |FontPeer - java.awt.peer
+       |FormView - javax.swing.text.html
+       |Formatter - java.util
+       |Formatter - java.util.logging
+       |FocusEvent - java.awt.event
+       |FontMetrics - java.awt
+       |Found - scala.collection.Searching
        |""".stripMargin
   )
 
@@ -1875,6 +2002,16 @@ class CompletionSuite extends BaseCompletionSuite {
        |  extension (using Foo)(x: Int)(using Fo@@)
        |""".stripMargin,
     """|Foo extension-definition-mix-3
+       |Font - java.awt
+       |Form - java.text.Normalizer
+       |Format - java.text
+       |FontPeer - java.awt.peer
+       |FormView - javax.swing.text.html
+       |Formatter - java.util
+       |Formatter - java.util.logging
+       |FocusEvent - java.awt.event
+       |FontMetrics - java.awt
+       |Found - scala.collection.Searching
        |""".stripMargin
   )
 
@@ -1887,6 +2024,16 @@ class CompletionSuite extends BaseCompletionSuite {
        |  extension [A](x: Fo@@)
        |""".stripMargin,
     """|Foo extension-definition-mix-4
+       |Font - java.awt
+       |Form - java.text.Normalizer
+       |Format - java.text
+       |FontPeer - java.awt.peer
+       |FormView - javax.swing.text.html
+       |Formatter - java.util
+       |Formatter - java.util.logging
+       |FocusEvent - java.awt.event
+       |FontMetrics - java.awt
+       |Found - scala.collection.Searching
        |""".stripMargin
   )
 
@@ -1899,6 +2046,16 @@ class CompletionSuite extends BaseCompletionSuite {
        |  extension [A](using Fo@@)(x: Int)
        |""".stripMargin,
     """|Foo extension-definition-mix-5
+       |Font - java.awt
+       |Form - java.text.Normalizer
+       |Format - java.text
+       |FontPeer - java.awt.peer
+       |FormView - javax.swing.text.html
+       |Formatter - java.util
+       |Formatter - java.util.logging
+       |FocusEvent - java.awt.event
+       |FontMetrics - java.awt
+       |Found - scala.collection.Searching
        |""".stripMargin
   )
 
@@ -1911,6 +2068,16 @@ class CompletionSuite extends BaseCompletionSuite {
        |  extension [A](using Foo)(x: Fo@@)
        |""".stripMargin,
     """|Foo extension-definition-mix-6
+       |Font - java.awt
+       |Form - java.text.Normalizer
+       |Format - java.text
+       |FontPeer - java.awt.peer
+       |FormView - javax.swing.text.html
+       |Formatter - java.util
+       |Formatter - java.util.logging
+       |FocusEvent - java.awt.event
+       |FontMetrics - java.awt
+       |Found - scala.collection.Searching
        |""".stripMargin
   )
 
@@ -1923,6 +2090,16 @@ class CompletionSuite extends BaseCompletionSuite {
        |  extension [A](using Foo)(x: Fo@@)(using Foo)
        |""".stripMargin,
     """|Foo extension-definition-mix-7
+       |Font - java.awt
+       |Form - java.text.Normalizer
+       |Format - java.text
+       |FontPeer - java.awt.peer
+       |FormView - javax.swing.text.html
+       |Formatter - java.util
+       |Formatter - java.util.logging
+       |FocusEvent - java.awt.event
+       |FontMetrics - java.awt
+       |Found - scala.collection.Searching
        |""".stripMargin
   )
 
@@ -2042,6 +2219,66 @@ class CompletionSuite extends BaseCompletionSuite {
        |}
        |""".stripMargin,
     assertSingleItem = false
+  )
+
+  check(
+    "multi-imports",
+    """|import scala.collection.{AbstractMap, Set@@}
+       |""".stripMargin,
+    """|Set scala.collection
+       |SetLike scala.collection
+       |SetProxy scala.collection
+       |SetProxyLike scala.collection
+       |AbstractSet scala.collection
+       |""".stripMargin,
+    topLines = Some(5),
+    compat = Map(
+      "3" ->
+        """|Set scala.collection
+           |SetOps scala.collection
+           |""".stripMargin,
+      "2.13" -> """|Set scala.collection
+                   |SetOps scala.collection
+                   |AbstractSet scala.collection
+                   |BitSet scala.collection
+                   |BitSetOps scala.collection
+                   |""".stripMargin
+    )
+  )
+
+  check(
+    "multi-imports-empty-query",
+    """|import scala.collection.{AbstractMap, @@}
+       |""".stripMargin,
+    """|+: scala.collection
+       |:+ scala.collection
+       |AbstractIterable scala.collection
+       |AbstractIterator scala.collection
+       |AbstractMap scala.collection
+       |""".stripMargin,
+    topLines = Some(5),
+    compat = Map(
+      "3" ->
+        """|GenIterable scala.collection
+           |GenMap scala.collection
+           |GenSeq scala.collection
+           |GenSet scala.collection
+           |GenTraversable scala.collection
+           |""".stripMargin,
+      "2.13" -> """|AbstractIndexedSeqView scala.collection
+                   |AbstractIterable scala.collection
+                   |AbstractIterator scala.collection
+                   |AbstractMap scala.collection
+                   |AbstractMapView scala.collection
+                   |""".stripMargin
+    )
+  )
+
+  check(
+    "import-rename",
+    """|import scala.collection.{AbstractMap => Set@@}
+       |""".stripMargin,
+    ""
   )
 
 }

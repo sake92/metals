@@ -40,8 +40,6 @@ import scala.meta.internal.builds.ScalaCliBuildTool
 import scala.meta.internal.builds.ShellRunner
 import scala.meta.internal.builds.VersionRecommendation
 import scala.meta.internal.builds.WorkspaceReload
-import scala.meta.internal.decorations.PublishDecorationsParams
-import scala.meta.internal.decorations.SyntheticHoverProvider
 import scala.meta.internal.implementation.ImplementationProvider
 import scala.meta.internal.implementation.Supermethods
 import scala.meta.internal.io.FileIO
@@ -78,8 +76,8 @@ import scala.meta.internal.parsing.DocumentSymbolProvider
 import scala.meta.internal.parsing.FoldingRangeProvider
 import scala.meta.internal.parsing.TokenEditDistance
 import scala.meta.internal.parsing.Trees
-import scala.meta.internal.remotels.RemoteLanguageServer
 import scala.meta.internal.rename.RenameProvider
+import scala.meta.internal.search.SymbolHierarchyOps
 import scala.meta.internal.semver.SemVer
 import scala.meta.internal.tvp._
 import scala.meta.internal.worksheets.DecorationWorksheetPublisher
@@ -236,13 +234,6 @@ class MetalsLspService(
 
   private val scalaVersionSelector = new ScalaVersionSelector(
     () => userConfig,
-    buildTargets,
-  )
-  private val remote = new RemoteLanguageServer(
-    () => folder,
-    () => userConfig,
-    initialServerConfig,
-    buffers,
     buildTargets,
   )
 
@@ -407,13 +398,6 @@ class MetalsLspService(
         compilers.didCompile(report)
       },
       onBuildTargetDidCompile = { target =>
-        treeView.onBuildTargetDidCompile(target) match {
-          case Some(toUpdate) =>
-            languageClient.metalsTreeViewDidChange(
-              TreeViewDidChangeParams(toUpdate)
-            )
-          case None =>
-        }
         worksheetProvider.onBuildTargetDidCompile(target)
       },
       onBuildTargetDidChangeFunc = params => {
@@ -472,7 +456,6 @@ class MetalsLspService(
     semanticdbs,
     warnings,
     () => compilers,
-    remote,
     trees,
     buildTargets,
     scalaVersionSelector,
@@ -534,59 +517,13 @@ class MetalsLspService(
     )
   }
 
-  private val implementationProvider: ImplementationProvider =
-    new ImplementationProvider(
-      semanticdbs,
-      folder,
-      definitionIndex,
-      buildTargets,
-      buffers,
-      definitionProvider,
-      trees,
-      scalaVersionSelector,
-    )
-
-  private val supermethods: Supermethods = new Supermethods(
-    languageClient,
-    definitionProvider,
-    implementationProvider,
-  )
-
   private val referencesProvider: ReferenceProvider = new ReferenceProvider(
     folder,
     semanticdbs,
     buffers,
     definitionProvider,
-    remote,
     trees,
     buildTargets,
-  )
-
-  private val syntheticHoverProvider: SyntheticHoverProvider =
-    new SyntheticHoverProvider(
-      folder,
-      semanticdbs,
-      buffers,
-      fingerprints,
-      charset,
-      clientConfig,
-      () => userConfig,
-      trees,
-    )
-
-  val classpathTreeIndex = new IndexedSymbols(
-    isStatisticsEnabled = clientConfig.initialConfig.statistics.isTreeView
-  )
-
-  private val semanticDBIndexer: SemanticdbIndexer = new SemanticdbIndexer(
-    List(
-      referencesProvider,
-      implementationProvider,
-      testProvider,
-      classpathTreeIndex,
-    ),
-    buildTargets,
-    folder,
   )
 
   private val formattingProvider: FormattingProvider = new FormattingProvider(
@@ -600,26 +537,6 @@ class MetalsLspService(
     tables,
     buildTargets,
   )
-
-  private val javaFormattingProvider: JavaFormattingProvider =
-    new JavaFormattingProvider(
-      buffers,
-      () => userConfig,
-      buildTargets,
-    )
-
-  private val callHierarchyProvider: CallHierarchyProvider =
-    new CallHierarchyProvider(
-      folder,
-      semanticdbs,
-      definitionProvider,
-      referencesProvider,
-      clientConfig.icons,
-      () => compilers,
-      trees,
-      buildTargets,
-      supermethods,
-    )
 
   private val javaHighlightProvider: JavaDocumentHighlightProvider =
     new JavaDocumentHighlightProvider(
@@ -641,6 +558,10 @@ class MetalsLspService(
     packageProvider,
     scalaVersionSelector,
     clientConfig.icons,
+    onCreate = path => {
+      buildTargets.onCreate(path)
+      onChange(List(path))
+    },
   )
 
   private val symbolSearch: MetalsSymbolSearch = new MetalsSymbolSearch(
@@ -696,9 +617,70 @@ class MetalsLspService(
     )
   )
 
+  private val javaFormattingProvider: JavaFormattingProvider =
+    new JavaFormattingProvider(
+      buffers,
+      () => userConfig,
+      buildTargets,
+    )
+
+  private val implementationProvider: ImplementationProvider =
+    new ImplementationProvider(
+      semanticdbs,
+      folder,
+      definitionIndex,
+      buffers,
+      definitionProvider,
+      trees,
+      scalaVersionSelector,
+      compilers,
+      buildTargets,
+    )
+
+  private val symbolHierarchyOps: SymbolHierarchyOps =
+    new SymbolHierarchyOps(
+      folder,
+      buildTargets,
+      semanticdbs,
+      definitionIndex,
+      scalaVersionSelector,
+      buffers,
+      trees,
+    )
+
+  private val supermethods: Supermethods = new Supermethods(
+    languageClient,
+    definitionProvider,
+    symbolHierarchyOps,
+  )
+
+  private val semanticDBIndexer: SemanticdbIndexer = new SemanticdbIndexer(
+    List(
+      referencesProvider,
+      implementationProvider,
+      testProvider,
+    ),
+    buildTargets,
+    folder,
+  )
+
+  private val callHierarchyProvider: CallHierarchyProvider =
+    new CallHierarchyProvider(
+      folder,
+      semanticdbs,
+      definitionProvider,
+      referencesProvider,
+      clientConfig.icons,
+      () => compilers,
+      trees,
+      buildTargets,
+      supermethods,
+    )
+
   private val renameProvider: RenameProvider = new RenameProvider(
     referencesProvider,
     implementationProvider,
+    symbolHierarchyOps,
     definitionProvider,
     folder,
     languageClient,
@@ -728,6 +710,7 @@ class MetalsLspService(
       testProvider,
     )
   )
+  buildClient.registerLogForwarder(debugProvider)
 
   private val scalafixProvider: ScalafixProvider = ScalafixProvider(
     buffers,
@@ -750,6 +733,12 @@ class MetalsLspService(
     diagnostics,
     languageClient,
   )
+
+  private val inlayHintResolveProvider: InlayHintResolveProvider =
+    new InlayHintResolveProvider(
+      definitionProvider,
+      compilers,
+    )
 
   val doctor: Doctor = new Doctor(
     folder,
@@ -812,7 +801,10 @@ class MetalsLspService(
       definitionIndex,
       () => userConfig,
       scalaVersionSelector,
-      classpathTreeIndex,
+      languageClient,
+      clientConfig,
+      trees,
+      buffers,
     )
 
   private val popupChoiceReset: PopupChoiceReset = new PopupChoiceReset(
@@ -913,26 +905,11 @@ class MetalsLspService(
   def fullConnect(): Future[Unit] = {
     buildTools.initialize()
     for {
-      found <- supportedBuildTool()
-      chosenBuildServer = found match {
-        case Some(BuildTool.Found(buildServer, _))
-            if buildServer.forcesBuildServer =>
-          tables.buildServers.chooseServer(buildServer.executableName)
-          Some(buildServer.executableName)
-        case _ => tables.buildServers.selectedServer()
-      }
-      _ <- Future
-        .sequence(
-          List(
-            quickConnectToBuildServer(),
-            slowConnectToBuildServer(
-              forceImport = false,
-              found,
-              chosenBuildServer,
-            ),
-          )
-        )
-    } yield ()
+      _ <-
+        if (buildTools.isAutoConnectable(optProjectRoot()))
+          autoConnectToBuildServer()
+        else slowConnectToBuildServer(forceImport = false)
+    } yield buildServerPromise.trySuccess(())
   }
 
   def initialized(): Future[Unit] = {
@@ -954,7 +931,9 @@ class MetalsLspService(
   }
 
   def onShutdown(): Unit = {
-    tables.fingerprints.save(fingerprints.getAllFingerprints())
+    tables.fingerprints.save(fingerprints.getAllFingerprints().filter {
+      case (path, _) => path.isScalaOrJava && !path.isDependencySource(folder)
+    })
     cancel()
   }
 
@@ -1001,21 +980,8 @@ class MetalsLspService(
         userConfig.showImplicitConversionsAndClasses != old.showImplicitConversionsAndClasses ||
         userConfig.showInferredType != old.showInferredType
       ) {
-        for {
-          _ <- buildServerPromise.future
-          _ <- focusedDocument()
-            .map { path =>
-              Future.sequence(
-                List(
-                  publishSynthetics(path, force = true)
-                )
-              )
-            }
-            .getOrElse(Future.successful(()))
-        } yield ()
-      } else {
-        Future.successful(())
-      }
+        languageClient.refreshInlayHints().asScala
+      } else Future.successful(())
 
     val restartBuildServer = bspSession
       .map { session =>
@@ -1068,14 +1034,24 @@ class MetalsLspService(
     // In some cases like peeking definition didOpen might be followed up by close
     // and we would lose the notion of the focused document
     recentlyOpenedFiles.add(path)
+    val prevBuildTarget = focusedDocumentBuildTarget.getAndUpdate { current =>
+      buildTargets
+        .inverseSources(path)
+        .getOrElse(current)
+    }
 
     // Update md5 fingerprint from file contents on disk
     fingerprints.add(path, FileIO.slurp(path, charset))
     // Update in-memory buffer contents from LSP client
     buffers.put(path, params.getTextDocument.getText)
 
+    val optVersion =
+      Option.when(initializeParams.supportsVersionedWorkspaceEdits)(
+        params.getTextDocument().getVersion()
+      )
+
     packageProvider
-      .workspaceEdit(path)
+      .workspaceEdit(path, params.getTextDocument().getText(), optVersion)
       .map(new ApplyWorkspaceEditParams(_))
       .foreach(languageClient.applyEdit)
 
@@ -1088,33 +1064,21 @@ class MetalsLspService(
       interactiveSemanticdbs.textDocument(path)
     }
 
-    val publishSynthetics0 = for {
-      _ <- Future.sequence(List(parseTrees(path), interactive))
-      _ <- Future.sequence(
-        List(
-          publishSynthetics(path),
-          testProvider.didOpen(path),
-        )
-      )
-    } yield ()
+    val parser = parseTrees(path)
 
     if (path.isDependencySource(folder)) {
-      CompletableFuture.completedFuture(())
+      parser.asJava
     } else {
       buildServerPromise.future.flatMap { _ =>
         def load(): Future[Unit] = {
-          val compileAndLoad =
-            Future.sequence(
-              List(
-                compilers.load(List(path)),
-                compilations.compileFile(path),
-              )
-            )
           Future
             .sequence(
               List(
-                compileAndLoad,
-                publishSynthetics0,
+                maybeCompileOnDidFocus(path, prevBuildTarget),
+                compilers.load(List(path)),
+                parser,
+                interactive,
+                testProvider.didOpen(path),
               )
             )
             .ignoreValue
@@ -1127,76 +1091,45 @@ class MetalsLspService(
     }
   }
 
-  def publishSynthetics(
-      path: AbsolutePath,
-      force: Boolean = false,
-  ): Future[Unit] = {
-    CancelTokens.future { token =>
-      val shouldShow = (force || userConfig.areSyntheticsEnabled()) &&
-        clientConfig.isInlineDecorationProvider()
-      if (shouldShow) {
-        compilers.syntheticDecorations(path, token).map { decorations =>
-          val params = new PublishDecorationsParams(
-            path.toURI.toString(),
-            decorations.asScala.toArray,
-            if (clientConfig.isInlineDecorationProvider()) true else null,
-          )
-          languageClient.metalsPublishDecorations(params)
-        }
-      } else Future.successful(())
-    }.asScala
-  }
-
   def didFocus(
       uri: String
   ): CompletableFuture[DidFocusResult.Value] = {
     val path = uri.toAbsolutePath
-    buildTargets
-      .inverseSources(path)
-      .foreach(focusedDocumentBuildTarget.set)
+    val prevBuildTarget = focusedDocumentBuildTarget.getAndUpdate { current =>
+      buildTargets
+        .inverseSources(path)
+        .getOrElse(current)
+    }
     // Don't trigger compilation on didFocus events under cascade compilation
     // because save events already trigger compile in inverse dependencies.
     if (path.isDependencySource(folder)) {
-      publishSynthetics(path)
       CompletableFuture.completedFuture(DidFocusResult.NoBuildTarget)
     } else if (recentlyOpenedFiles.isRecentlyActive(path)) {
       CompletableFuture.completedFuture(DidFocusResult.RecentlyActive)
     } else {
-      publishSynthetics(path)
       worksheetProvider.onDidFocus(path)
-      buildTargets.inverseSources(path) match {
-        case Some(target) =>
-          val isAffectedByCurrentCompilation =
-            path.isWorksheet ||
-              buildTargets.isInverseDependency(
-                target,
-                compilations.currentlyCompiling.toList,
-              )
-
-          def isAffectedByLastCompilation: Boolean =
-            !compilations.wasPreviouslyCompiled(target) &&
-              buildTargets.isInverseDependency(
-                target,
-                compilations.previouslyCompiled.toList,
-              )
-
-          val needsCompile =
-            isAffectedByCurrentCompilation || isAffectedByLastCompilation
-          if (needsCompile) {
-            compilations
-              .compileFile(path)
-              .map(_ => DidFocusResult.Compiled)
-              .asJava
-          } else {
-            CompletableFuture.completedFuture(
-              DidFocusResult.AlreadyCompiled
-            )
-          }
-        case None =>
-          CompletableFuture.completedFuture(DidFocusResult.NoBuildTarget)
-      }
+      maybeCompileOnDidFocus(path, prevBuildTarget).asJava
     }
   }
+
+  private def maybeCompileOnDidFocus(
+      path: AbsolutePath,
+      prevBuildTarget: b.BuildTargetIdentifier,
+  ) =
+    buildTargets.inverseSources(path) match {
+      case Some(target) if prevBuildTarget != target =>
+        compilations
+          .compileFile(path)
+          .map(_ => DidFocusResult.Compiled)
+      case _ if path.isWorksheet =>
+        compilations
+          .compileFile(path)
+          .map(_ => DidFocusResult.Compiled)
+      case Some(_) =>
+        Future.successful(DidFocusResult.AlreadyCompiled)
+      case None =>
+        Future.successful(DidFocusResult.NoBuildTarget)
+    }
 
   def pause(): Unit = pauseables.pause()
 
@@ -1211,9 +1144,10 @@ class MetalsLspService(
         val path = params.getTextDocument.getUri.toAbsolutePath
         buffers.put(path, change.getText)
         diagnostics.didChange(path)
+
         parseTrees(path)
-          .flatMap { _ =>
-            publishSynthetics(path)
+          .map { _ =>
+            treeView.onWorkspaceFileDidChange(path)
           }
           .ignoreValue
           .asJava
@@ -1246,6 +1180,9 @@ class MetalsLspService(
             path
           )
       )
+      .map { _ =>
+        treeView.onWorkspaceFileDidChange(path)
+      }
       .ignoreValue
       .asJava
   }
@@ -1332,8 +1269,7 @@ class MetalsLspService(
    */
   private def fileWatchFilter(path: Path): Boolean = {
     val abs = AbsolutePath(path)
-    abs.isScalaOrJava || abs.isSemanticdb || abs.isBuild ||
-    abs.isInBspDirectory(folder)
+    abs.isScalaOrJava || abs.isSemanticdb || abs.isInBspDirectory(folder)
   }
 
   /**
@@ -1376,8 +1312,6 @@ class MetalsLspService(
             semanticDBIndexer.onOverflow(semanticdbPath)
         }
       }.asJava
-    } else if (path.isBuild) {
-      onBuildChanged(List(path)).asJava
     } else {
       CompletableFuture.completedFuture(())
     }
@@ -1408,6 +1342,7 @@ class MetalsLspService(
             .compileFiles(List(path), Option(focusedDocumentBuildTarget.get())),
           Future {
             diagnostics.didDelete(path)
+            treeView.onWorkspaceFileDidChange(path)
             testProvider.onFileDelete(path)
           },
         )
@@ -1440,12 +1375,7 @@ class MetalsLspService(
     CancelTokens.future { token =>
       compilers
         .hover(params, token)
-        .map { hover =>
-          syntheticHoverProvider.addSyntheticsHover(
-            params,
-            hover.map(_.toLsp()),
-          )
-        }
+        .map(_.map(_.toLsp()))
         .map(
           _.orElse {
             val path = params.textDocument.getUri.toAbsolutePath
@@ -1455,6 +1385,30 @@ class MetalsLspService(
               None
           }.orNull
         )
+    }
+  }
+
+  def inlayHints(
+      params: InlayHintParams
+  ): CompletableFuture[util.List[InlayHint]] = {
+    CancelTokens.future { token =>
+      for {
+        _ <- userConfigPromise.future
+        hints <-
+          if (userConfig.areSyntheticsEnabled())
+            compilers.inlayHints(params, token)
+          else Future.successful(List.empty[l.InlayHint].asJava)
+      } yield hints
+    }
+  }
+
+  def inlayHintResolve(
+      inlayHint: InlayHint
+  ): CompletableFuture[InlayHint] = {
+    CancelTokens.future { token =>
+      focusedDocument()
+        .map(path => inlayHintResolveProvider.resolve(inlayHint, path, token))
+        .getOrElse(Future.successful(inlayHint))
     }
   }
 
@@ -1677,13 +1631,13 @@ class MetalsLspService(
       params: CodeLensParams
   ): CompletableFuture[util.List[CodeLens]] =
     CancelTokens.future { _ =>
-      buildServerPromise.future.map { _ =>
+      buildServerPromise.future.flatMap { _ =>
         timerProvider.timedThunk(
           "code lens generation",
           thresholdMillis = 1.second.toMillis,
         ) {
           val path = params.getTextDocument.getUri.toAbsolutePath
-          codeLensProvider.findLenses(path).toList.asJava
+          codeLensProvider.findLenses(path).map(_.toList.asJava)
         }
       }
     }
@@ -1719,7 +1673,9 @@ class MetalsLspService(
     indexingPromise.future.map { _ =>
       val timer = new Timer(time)
       val result =
-        workspaceSymbols.search(params.getQuery, token, currentDialect).toList
+        workspaceSymbols
+          .search(params.getQuery, token, focusedDocument())
+          .toList
       if (clientConfig.initialConfig.statistics.isWorkspaceSymbol) {
         scribe.info(
           s"time: found ${result.length} results for query '${params.getQuery}' in $timer"
@@ -1729,11 +1685,8 @@ class MetalsLspService(
     }
 
   def workspaceSymbol(query: String): Seq[SymbolInformation] = {
-    workspaceSymbols.search(query, currentDialect)
+    workspaceSymbols.search(query, focusedDocument())
   }
-
-  private def currentDialect =
-    focusedDocument().flatMap(scalaVersionSelector.dialectFromBuildTarget)
 
   def indexSources(): Future[Unit] = Future {
     indexer.indexWorkspaceSources(buildTargets.allWritableData)
@@ -1829,6 +1782,11 @@ class MetalsLspService(
   def cleanCompile(): Future[Unit] = compilations.recompileAll()
 
   def cancelCompile(): Future[Unit] = Future {
+    // We keep this in here to provide a way for clients that aren't slowTask providers
+    // to be able to cancel a long-running worksheet evaluation by canceling compilation.
+    if (focusedDocument().exists(_.isWorksheet))
+      worksheetProvider.cancel()
+
     compilations.cancel()
     scribe.info("compilation cancelled")
   }
@@ -1977,7 +1935,7 @@ class MetalsLspService(
     ): Unit =
       status match {
         case Generated =>
-          tables.buildServers.chooseServer(buildTool.getBuildServerName)
+          tables.buildServers.chooseServer(buildTool.buildServerName)
           quickConnectToBuildServer().ignoreValue
         case Cancelled => ()
         case Failed(exit) =>
@@ -2089,46 +2047,30 @@ class MetalsLspService(
 
   def slowConnectToBuildServer(
       forceImport: Boolean
-  ): Future[BuildChange] = for {
-    buildTool <- supportedBuildTool()
-    chosenBuildServer = tables.buildServers.selectedServer()
-    buildChange <- slowConnectToBuildServer(
-      forceImport,
-      buildTool,
-      chosenBuildServer,
-    )
-  } yield buildChange
-
-  def slowConnectToBuildServer(
-      forceImport: Boolean,
-      buildTool: Option[BuildTool.Found],
-      chosenBuildServer: Option[String],
   ): Future[BuildChange] = {
-    val isBloopOrEmpty = chosenBuildServer.isEmpty || chosenBuildServer.exists(
-      _ == BloopServers.name
-    )
+    val chosenBuildServer = tables.buildServers.selectedServer()
+    def useBuildToolBsp(buildTool: BuildTool) =
+      buildTool match {
+        case _: BloopInstallProvider => userConfig.defaultBspToBuildTool
+        case _: BuildServerProvider => true
+        case _ => false
+      }
 
-    buildTool match {
+    def isSelected(buildTool: BuildTool) =
+      buildTool match {
+        case _: BuildServerProvider =>
+          chosenBuildServer.contains(buildTool.buildServerName)
+        case _ => false
+      }
+
+    supportedBuildTool().flatMap {
       case Some(BuildTool.Found(buildTool: BloopInstallProvider, digest))
-          if isBloopOrEmpty =>
+          if chosenBuildServer.contains(BloopServers.name) ||
+            chosenBuildServer.isEmpty && !useBuildToolBsp(buildTool) =>
         slowConnectToBloopServer(forceImport, buildTool, digest)
-      case Some(BuildTool.Found(buildTool: ScalaCliBuildTool, _))
-          if !buildTool.isBspGenerated(folder) =>
-        tables.buildServers.chooseServer(buildTool.executableName)
-        buildTool
-          .generateBspConfig(
-            folder,
-            args => bspConfigGenerator.runUnconditionally(buildTool, args),
-            statusBar,
-          )
-          .flatMap(_ => quickConnectToBuildServer())
-      case Some(BuildTool.Found(buildTool, _))
-          if !chosenBuildServer.exists(
-            _ == buildTool.executableName
-          ) && buildTool.forcesBuildServer =>
-        tables.buildServers.chooseServer(buildTool.executableName)
-        quickConnectToBuildServer()
-      case Some(found) =>
+      case Some(found)
+          if isSelected(found.buildTool) &&
+            found.buildTool.isBspGenerated(folder) =>
         indexer.reloadWorkspaceAndIndex(
           forceImport,
           found.buildTool,
@@ -2136,9 +2078,67 @@ class MetalsLspService(
           importBuild,
           quickConnectToBuildServer,
         )
-      case None =>
-        Future.successful(BuildChange.None)
+      case Some(BuildTool.Found(buildTool: BuildServerProvider, _)) =>
+        slowConnectToBuildToolBsp(buildTool, forceImport, isSelected(buildTool))
+      // Used in tests, `.bloop` folder exists but no build tool is detected
+      case _ => quickConnectToBuildServer()
     }
+  }
+
+  private def slowConnectToBuildToolBsp(
+      buildTool: BuildServerProvider,
+      forceImport: Boolean,
+      isSelected: Boolean,
+  ) = {
+    val notification = tables.dismissedNotifications.ImportChanges
+    if (buildTool.isBspGenerated(folder)) {
+      maybeChooseServer(buildTool.buildServerName, isSelected)
+      quickConnectToBuildServer()
+    } else if (
+      userConfig.shouldAutoImportNewProject || forceImport || isSelected ||
+      buildTool.isInstanceOf[ScalaCliBuildTool]
+    ) {
+      maybeChooseServer(buildTool.buildServerName, isSelected)
+      generateBspAndConnect(buildTool)
+    } else if (notification.isDismissed) {
+      Future.successful(BuildChange.None)
+    } else {
+      scribe.debug("Awaiting user response...")
+      languageClient
+        .showMessageRequest(
+          Messages.GenerateBspAndConnect
+            .params(buildTool.executableName, buildTool.buildServerName)
+        )
+        .asScala
+        .flatMap { item =>
+          if (item == Messages.dontShowAgain) {
+            notification.dismissForever()
+            Future.successful(BuildChange.None)
+          } else if (item == Messages.GenerateBspAndConnect.yes) {
+            maybeChooseServer(buildTool.buildServerName, isSelected)
+            generateBspAndConnect(buildTool)
+          } else {
+            notification.dismiss(2, TimeUnit.MINUTES)
+            Future.successful(BuildChange.None)
+          }
+        }
+    }
+  }
+
+  private def maybeChooseServer(name: String, alreadySelected: Boolean) =
+    if (alreadySelected) Future.successful(())
+    else tables.buildServers.chooseServer(name)
+
+  private def generateBspAndConnect(
+      buildTool: BuildServerProvider
+  ): Future[BuildChange] = {
+    buildTool
+      .generateBspConfig(
+        folder,
+        args => bspConfigGenerator.runUnconditionally(buildTool, args),
+        statusBar,
+      )
+      .flatMap(_ => quickConnectToBuildServer())
   }
 
   /**
@@ -2450,6 +2450,7 @@ class MetalsLspService(
     scalaVersionSelector,
     sourceMapper,
     folder,
+    implementationProvider,
   )
 
   private def checkRunningBloopVersion(bspServerVersion: String) = {
@@ -2796,17 +2797,42 @@ class MetalsLspService(
     }
   }
 
+  private def clearFolders(folders: AbsolutePath*): Unit = {
+    try {
+      folders.foreach(_.deleteRecursively())
+    } catch {
+      case e: Throwable =>
+        languageClient.showMessage(Messages.ResetWorkspaceFailed)
+        scribe.error(
+          s"Error while deleting directories inside ${folders.mkString(", ")}",
+          e,
+        )
+    }
+  }
+
   def resetWorkspace(): Future[Unit] =
     for {
       _ <- disconnectOldBuildServer()
-      _ = optProjectRoot match {
+      shouldImport = optProjectRoot match {
         case Some(path) if buildTools.isBloop(path) =>
           bloopServers.shutdownServer()
           clearBloopDir(path)
-        case _ =>
+          false
+        case Some(path) if buildTools.isBazelBsp =>
+          clearFolders(
+            path.resolve(Directories.bazelBsp),
+            path.resolve(Directories.bsp),
+          )
+          true
+        case Some(path) if buildTools.isBsp =>
+          clearFolders(path.resolve(Directories.bsp))
+          true
+        case _ => false
       }
       _ = tables.cleanAll()
-      _ <- autoConnectToBuildServer().map(_ => ())
+      _ <-
+        if (shouldImport) slowConnectToBuildServer(true)
+        else autoConnectToBuildServer().map(_ => ())
     } yield ()
 
   def getTastyForURI(uri: URI): Future[Either[String, String]] =

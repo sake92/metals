@@ -225,6 +225,7 @@ abstract class BasePCSuite extends BaseSuite with PCSuite {
   }
 
   object IgnoreScalaVersion {
+
     def apply(version: String): IgnoreScalaVersion = {
       IgnoreScalaVersion(_ == version)
     }
@@ -272,6 +273,8 @@ abstract class BasePCSuite extends BaseSuite with PCSuite {
       extends IgnoreScalaVersion(version =>
         version.startsWith("2.") && version.contains("-bin-")
       )
+
+  object IgnoreScala213 extends IgnoreScalaVersion(_.startsWith("2.13"))
 
   object IgnoreScala212 extends IgnoreScalaVersion(_.startsWith("2.12"))
 

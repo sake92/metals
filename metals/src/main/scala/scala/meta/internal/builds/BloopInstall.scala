@@ -67,7 +67,7 @@ final class BloopInstall(
   }
 
   private def runArgumentsUnconditionally(
-      buildTool: BuildTool,
+      buildTool: BloopInstallProvider,
       args: List[String],
       javaHome: Option[String],
   ): Future[WorkspaceLoadedStatus] = {
@@ -132,30 +132,34 @@ final class BloopInstall(
           scribe.info(s"skipping build import with status '${result.name}'")
           Future.successful(result)
         case _ =>
-          scribe.debug("Awaiting user response...")
-          for {
-            userResponse <- requestImport(
-              buildTools,
-              buildTool,
-              languageClient,
-              digest,
-            )
-            installResult <- {
-              if (userResponse.isYes) {
-                runUnconditionally(buildTool, isImportInProcess)
-              } else {
-                // Don't spam the user with requests during rapid build changes.
-                notification.dismiss(2, TimeUnit.MINUTES)
-                Future.successful(WorkspaceLoadedStatus.Rejected)
+          if (userConfig().shouldAutoImportNewProject) {
+            runUnconditionally(buildTool, isImportInProcess)
+          } else {
+            scribe.debug("Awaiting user response...")
+            for {
+              userResponse <- requestImport(
+                buildTools,
+                buildTool,
+                languageClient,
+                digest,
+              )
+              installResult <- {
+                if (userResponse.isYes) {
+                  runUnconditionally(buildTool, isImportInProcess)
+                } else {
+                  // Don't spam the user with requests during rapid build changes.
+                  notification.dismiss(2, TimeUnit.MINUTES)
+                  Future.successful(WorkspaceLoadedStatus.Rejected)
+                }
               }
-            }
-          } yield installResult
+            } yield installResult
+          }
       }
     }
 
   private def persistChecksumStatus(
       status: Status,
-      buildTool: BuildTool,
+      buildTool: BloopInstallProvider,
   ): Unit = {
     buildTool.digest(workspace).foreach { checksum =>
       tables.digests.setStatus(checksum, status)
@@ -164,7 +168,7 @@ final class BloopInstall(
 
   private def requestImport(
       buildTools: BuildTools,
-      buildTool: BuildTool,
+      buildTool: BloopInstallProvider,
       languageClient: MetalsLanguageClient,
       digest: String,
   )(implicit ec: ExecutionContext): Future[Confirmation] = {

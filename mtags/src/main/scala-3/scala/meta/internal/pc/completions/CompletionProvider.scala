@@ -27,8 +27,8 @@ import org.eclipse.lsp4j.CompletionItemKind
 import org.eclipse.lsp4j.CompletionList
 import org.eclipse.lsp4j.InsertTextFormat
 import org.eclipse.lsp4j.InsertTextMode
-import org.eclipse.lsp4j.TextEdit
 import org.eclipse.lsp4j.Range as LspRange
+import org.eclipse.lsp4j.TextEdit
 
 class CompletionProvider(
     search: SymbolSearch,
@@ -58,7 +58,7 @@ class CompletionProvider(
             newctx
           )
         val locatedCtx =
-          MetalsInteractive.contextOfPath(tpdPath)(using newctx)
+          Interactive.contextOfPath(tpdPath)(using newctx)
         val indexedCtx = IndexedContext(locatedCtx)
         val completionPos =
           CompletionPos.infer(pos, params, path)(using newctx)
@@ -224,7 +224,7 @@ class CompletionProvider(
 
     def mkItemWithImports(
         v: CompletionValue.Workspace | CompletionValue.Extension |
-          CompletionValue.Interpolator
+          CompletionValue.Interpolator | CompletionValue.ImplicitClass
     ) =
       val sym = v.symbol
       path match
@@ -255,21 +255,31 @@ class CompletionProvider(
               r match
                 case IndexedContext.Result.InScope =>
                   mkItem(
-                    ident.backticked(backtickSoftKeyword) + completionTextSuffix
+                    v.insertText.getOrElse(
+                      ident.backticked(
+                        backtickSoftKeyword
+                      ) + completionTextSuffix
+                    ),
+                    range = v.range,
                   )
                 case _ if isInStringInterpolation =>
                   mkItem(
-                    "{" + sym.fullNameBackticked + completionTextSuffix + "}"
+                    "{" + sym.fullNameBackticked + completionTextSuffix + "}",
+                    range = v.range,
                   )
                 case _ if v.isExtensionMethod =>
                   mkItem(
-                    ident.backticked(backtickSoftKeyword) + completionTextSuffix
+                    ident.backticked(
+                      backtickSoftKeyword
+                    ) + completionTextSuffix,
+                    range = v.range,
                   )
                 case _ =>
                   mkItem(
                     sym.fullNameBackticked(
                       backtickSoftKeyword
-                    ) + completionTextSuffix
+                    ) + completionTextSuffix,
+                    range = v.range,
                   )
               end match
           end match
@@ -277,7 +287,8 @@ class CompletionProvider(
     end mkItemWithImports
 
     completion match
-      case v: (CompletionValue.Workspace | CompletionValue.Extension) =>
+      case v: (CompletionValue.Workspace | CompletionValue.Extension |
+            CompletionValue.ImplicitClass) =>
         mkItemWithImports(v)
       case v: CompletionValue.Interpolator if v.isWorkspace || v.isExtension =>
         mkItemWithImports(v)
